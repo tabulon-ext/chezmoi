@@ -27,7 +27,7 @@ jobs:
     - name: Checkout
       uses: actions/checkout@v2
     - name: Cache Go modules
-      uses: actions/cache@v2.1.4
+      uses: actions/cache@v2.1.5
       with:
         path: ~/go/pkg/mod
         key: ${{ runner.os }}-go1.16.2-${{ hashFiles('**/go.sum') }}
@@ -72,7 +72,7 @@ jobs:
       with:
         fetch-depth: 0
     - name: Cache Go modules
-      uses: actions/cache@v2.1.4
+      uses: actions/cache@v2.1.5
       with:
         path: ~/go/pkg/mod
         key: ${{ runner.os }}-go1.16.2-${{ hashFiles('**/go.sum') }}
@@ -126,7 +126,7 @@ jobs:
     - name: Checkout
       uses: actions/checkout@v2
     - name: Cache Go modules
-      uses: actions/cache@v2.1.4
+      uses: actions/cache@v2.1.5
       with:
         path: ~/go/pkg/mod
         key: ${{ runner.os }}-go1.16.2-${{ hashFiles('**/go.sum') }}
@@ -146,7 +146,7 @@ jobs:
     - name: Checkout
       uses: actions/checkout@v2
     - name: Cache Go modules
-      uses: actions/cache@v2.1.4
+      uses: actions/cache@v2.1.5
       with:
         path: ~/go/pkg/mod
         key: ${{ runner.os }}-go1.16.2-${{ hashFiles('**/go.sum') }}
@@ -185,7 +185,7 @@ jobs:
       with:
         fetch-depth: 0
     - name: Cache Go modules
-      uses: actions/cache@v2.1.4
+      uses: actions/cache@v2.1.5
       with:
         path: ~/go/pkg/mod
         key: ${{ runner.os }}-go1.16.2-${{ hashFiles('**/go.sum') }}
