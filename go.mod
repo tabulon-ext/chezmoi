@@ -17,7 +17,7 @@ require (
 	github.com/golang/protobuf v1.4.3 // indirect
 	github.com/google/go-cmp v0.5.4 // indirect
 	github.com/google/go-github/v33 v33.0.0
-	github.com/google/renameio v1.0.0
+	github.com/google/renameio v1.0.1
 	github.com/google/uuid v1.2.0 // indirect
 	github.com/gopherjs/gopherjs v0.0.0-20200217142428-fce0ec30dd00 // indirect
 	github.com/huandu/xstrings v1.3.2 // indirect
