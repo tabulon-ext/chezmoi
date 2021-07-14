@@ -1,14 +1,15 @@
 package chezmoi
 
 import (
+	"errors"
 	"io"
-	"os"
+	"io/fs"
 	"os/exec"
 
 	"github.com/go-git/go-git/v5/plumbing"
 	"github.com/go-git/go-git/v5/plumbing/filemode"
 	"github.com/go-git/go-git/v5/plumbing/format/diff"
-	vfs "github.com/twpayne/go-vfs/v2"
+	vfs "github.com/twpayne/go-vfs/v3"
 )
 
 // A GitDiffSystem wraps a System and logs all of the actions executed as a git
@@ -19,7 +20,9 @@ type GitDiffSystem struct {
 	unifiedEncoder *diff.UnifiedEncoder
 }
 
-// NewGitDiffSystem returns a new GitDiffSystem.
+// NewGitDiffSystem returns a new GitDiffSystem. Output is written to w, the
+// dirAbsPath is stripped from paths, and color controls whether the output
+// contains ANSI color escape sequences.
 func NewGitDiffSystem(system System, w io.Writer, dirAbsPath AbsPath, color bool) *GitDiffSystem {
 	unifiedEncoder := diff.NewUnifiedEncoder(w, diff.DefaultContextLines)
 	if color {
@@ -33,12 +36,12 @@ func NewGitDiffSystem(system System, w io.Writer, dirAbsPath AbsPath, color bool
 }
 
 // Chmod implements System.Chmod.
-func (s *GitDiffSystem) Chmod(name AbsPath, mode os.FileMode) error {
+func (s *GitDiffSystem) Chmod(name AbsPath, mode fs.FileMode) error {
 	fromInfo, err := s.system.Stat(name)
 	if err != nil {
 		return err
 	}
-	toMode := fromInfo.Mode()&^os.ModePerm | mode
+	toMode := fromInfo.Mode().Type() | mode
 	var toData []byte
 	if fromInfo.Mode().IsRegular() {
 		toData, err = s.ReadFile(name)
@@ -57,19 +60,24 @@ func (s *GitDiffSystem) Glob(pattern string) ([]string, error) {
 	return s.system.Glob(pattern)
 }
 
+// IdempotentCmdCombinedOutput implements System.IdempotentCmdCombinedOutput.
+func (s *GitDiffSystem) IdempotentCmdCombinedOutput(cmd *exec.Cmd) ([]byte, error) {
+	return s.system.IdempotentCmdCombinedOutput(cmd)
+}
+
 // IdempotentCmdOutput implements System.IdempotentCmdOutput.
 func (s *GitDiffSystem) IdempotentCmdOutput(cmd *exec.Cmd) ([]byte, error) {
 	return s.system.IdempotentCmdOutput(cmd)
 }
 
 // Lstat implements System.Lstat.
-func (s *GitDiffSystem) Lstat(name AbsPath) (os.FileInfo, error) {
+func (s *GitDiffSystem) Lstat(name AbsPath) (fs.FileInfo, error) {
 	return s.system.Lstat(name)
 }
 
 // Mkdir implements System.Mkdir.
-func (s *GitDiffSystem) Mkdir(name AbsPath, perm os.FileMode) error {
-	if err := s.encodeDiff(name, nil, os.ModeDir|perm); err != nil {
+func (s *GitDiffSystem) Mkdir(name AbsPath, perm fs.FileMode) error {
+	if err := s.encodeDiff(name, nil, fs.ModeDir|perm); err != nil {
 		return err
 	}
 	return s.system.Mkdir(name, perm)
@@ -81,7 +89,7 @@ func (s *GitDiffSystem) RawPath(path AbsPath) (AbsPath, error) {
 }
 
 // ReadDir implements System.ReadDir.
-func (s *GitDiffSystem) ReadDir(name AbsPath) ([]os.DirEntry, error) {
+func (s *GitDiffSystem) ReadDir(name AbsPath) ([]fs.DirEntry, error) {
 	return s.system.ReadDir(name)
 }
 
@@ -148,8 +156,8 @@ func (s *GitDiffSystem) RunCmd(cmd *exec.Cmd) error {
 }
 
 // RunScript implements System.RunScript.
-func (s *GitDiffSystem) RunScript(scriptname RelPath, dir AbsPath, data []byte) error {
-	mode := os.FileMode(filemode.Executable)
+func (s *GitDiffSystem) RunScript(scriptname RelPath, dir AbsPath, data []byte, interpreter *Interpreter) error {
+	mode := fs.FileMode(filemode.Executable)
 	diffPatch, err := DiffPatch(scriptname, nil, mode, data, mode)
 	if err != nil {
 		return err
@@ -157,11 +165,11 @@ func (s *GitDiffSystem) RunScript(scriptname RelPath, dir AbsPath, data []byte) 
 	if err := s.unifiedEncoder.Encode(diffPatch); err != nil {
 		return err
 	}
-	return s.system.RunScript(scriptname, dir, data)
+	return s.system.RunScript(scriptname, dir, data, interpreter)
 }
 
 // Stat implements System.Stat.
-func (s *GitDiffSystem) Stat(name AbsPath) (os.FileInfo, error) {
+func (s *GitDiffSystem) Stat(name AbsPath) (fs.FileInfo, error) {
 	return s.system.Stat(name)
 }
 
@@ -171,7 +179,7 @@ func (s *GitDiffSystem) UnderlyingFS() vfs.FS {
 }
 
 // WriteFile implements System.WriteFile.
-func (s *GitDiffSystem) WriteFile(filename AbsPath, data []byte, perm os.FileMode) error {
+func (s *GitDiffSystem) WriteFile(filename AbsPath, data []byte, perm fs.FileMode) error {
 	if err := s.encodeDiff(filename, data, perm); err != nil {
 		return err
 	}
@@ -180,15 +188,17 @@ func (s *GitDiffSystem) WriteFile(filename AbsPath, data []byte, perm os.FileMod
 
 // WriteSymlink implements System.WriteSymlink.
 func (s *GitDiffSystem) WriteSymlink(oldname string, newname AbsPath) error {
-	if err := s.encodeDiff(newname, append([]byte(oldname), '\n'), os.ModeSymlink); err != nil {
+	if err := s.encodeDiff(newname, append([]byte(oldname), '\n'), fs.ModeSymlink); err != nil {
 		return err
 	}
 	return s.system.WriteSymlink(oldname, newname)
 }
 
-func (s *GitDiffSystem) encodeDiff(absPath AbsPath, toData []byte, toMode os.FileMode) error {
+// encodeDiff encodes the diff between the actual state of absPath and the
+// target state of toData and toMode.
+func (s *GitDiffSystem) encodeDiff(absPath AbsPath, toData []byte, toMode fs.FileMode) error {
 	var fromData []byte
-	var fromMode os.FileMode
+	var fromMode fs.FileMode
 	switch fromInfo, err := s.system.Stat(absPath); {
 	case err == nil && fromInfo.Mode().IsRegular():
 		fromData, err = s.system.ReadFile(absPath)
@@ -196,7 +206,7 @@ func (s *GitDiffSystem) encodeDiff(absPath AbsPath, toData []byte, toMode os.Fil
 			return err
 		}
 		fromMode = fromInfo.Mode()
-	case err == nil && fromInfo.Mode()&os.ModeType == os.ModeSymlink:
+	case err == nil && fromInfo.Mode().Type() == fs.ModeSymlink:
 		fromDataStr, err := s.system.Readlink(absPath)
 		if err != nil {
 			return err
@@ -205,7 +215,7 @@ func (s *GitDiffSystem) encodeDiff(absPath AbsPath, toData []byte, toMode os.Fil
 		fromMode = fromInfo.Mode()
 	case err == nil:
 		fromMode = fromInfo.Mode()
-	case os.IsNotExist(err):
+	case errors.Is(err, fs.ErrNotExist):
 	default:
 		return err
 	}
@@ -217,6 +227,7 @@ func (s *GitDiffSystem) encodeDiff(absPath AbsPath, toData []byte, toMode os.Fil
 	return s.unifiedEncoder.Encode(diffPatch)
 }
 
+// trimPrefix removes s's directory prefix from absPath.
 func (s *GitDiffSystem) trimPrefix(absPath AbsPath) RelPath {
 	return absPath.MustTrimDirPrefix(s.dirAbsPath)
 }

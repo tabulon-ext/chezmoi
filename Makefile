@@ -1,20 +1,25 @@
 GO?=go
-GOLANGCI_LINT_VERSION=1.38.0
+GOLANGCI_LINT_VERSION=1.41.0
 
 .PHONY: default
-default: build run test lint format
+default: run build test lint format
 
 .PHONY: build
-build: build-darwin build-linux build-windows
+build: build-darwin build-freebsd build-linux build-windows
 
 .PHONY: build-darwin
 build-darwin:
 	GOOS=darwin GOARCH=amd64 $(GO) build -o /dev/null .
 	GOOS=darwin GOARCH=arm64 $(GO) build -o /dev/null .
 
+.PHONY: build-freebsd
+build-freebsd:
+	GOOS=freebsd GOARCH=amd64 $(GO) build -o /dev/null .
+
 .PHONY: build-linux
 build-linux:
 	GOOS=linux GOARCH=amd64 $(GO) build -o /dev/null .
+	GOOS=linux GOARCH=amd64 $(GO) build -tags=noupgrade -o /dev/null .
 
 .PHONY: build-windows
 build-windows:
@@ -26,23 +31,25 @@ run:
 
 .PHONY: test
 test:
-	$(GO) test ./...
+	$(GO) test -ldflags="-X github.com/twpayne/chezmoi/internal/chezmoitest.umaskStr=0o022" ./...
+	$(GO) test -ldflags="-X github.com/twpayne/chezmoi/internal/chezmoitest.umaskStr=0o002" ./...
 
-.PHONY: completions
-completions:
-	$(GO) run . completion bash -o completions/chezmoi-completion.bash
-	$(GO) run . completion fish -o completions/chezmoi.fish
-	$(GO) run . completion powershell -o completions/chezmoi.ps1
-	$(GO) run . completion zsh -o completions/chezmoi.zsh
+.PHONY: coverage-html
+coverage-html: coverage
+	$(GO) tool cover -html=coverage.out
 
-.PHONY: generate-install.sh
-generate-install.sh:
-	$(GO) run ./internal/cmd/generate-install.sh > assets/scripts/install.sh
+.PHONY: coverage
+coverage:
+	$(GO) test -test.coverprofile=coverage.out ./...
+
+.PHONY: generate
+generate:
+	$(GO) generate
 
 .PHONY: lint
 lint: ensure-golangci-lint
 	./bin/golangci-lint run
-	$(GO) run ./internal/cmd/lint-whitespace
+	$(GO) run ./internal/cmds/lint-whitespace
 
 .PHONY: format
 format: ensure-gofumports

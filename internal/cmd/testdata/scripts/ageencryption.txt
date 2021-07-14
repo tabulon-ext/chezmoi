@@ -1,0 +1,34 @@
+[!exec:age] skip 'age not found in $PATH'
+
+mkhomedir
+mkageconfig
+
+# test that chezmoi add --encrypt encrypts
+cp golden/.encrypted $HOME
+chezmoi add --encrypt $HOME${/}.encrypted
+exists $CHEZMOISOURCEDIR/encrypted_dot_encrypted.age
+! grep plaintext $CHEZMOISOURCEDIR/encrypted_dot_encrypted.age
+
+# test that chezmoi apply decrypts
+rm $HOME/.encrypted
+chezmoi apply --force
+cmp golden/.encrypted $HOME/.encrypted
+
+# test that chezmoi apply --exclude=encrypted does not apply encrypted files
+rm $HOME/.encrypted
+chezmoi apply --exclude=encrypted --force
+! exists $HOME/.encrypted
+chezmoi apply --force
+cmp $HOME/.encrypted golden/.encrypted
+
+# test that chezmoi detects age encryption if age is configured but encryption = "age" is not set
+removeline $CHEZMOICONFIGDIR/chezmoi.toml 'encryption = "age"'
+chezmoi cat $HOME${/}.encrypted
+cmp stdout golden/.encrypted
+
+# test that chezmoi edit --apply transparently decrypts and re-encrypts
+chezmoi edit --apply --force $HOME${/}.encrypted
+grep '# edited' $HOME/.encrypted
+
+-- golden/.encrypted --
+plaintext

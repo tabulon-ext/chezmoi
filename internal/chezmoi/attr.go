@@ -1,7 +1,7 @@
 package chezmoi
 
 import (
-	"os"
+	"io/fs"
 	"strings"
 )
 
@@ -54,8 +54,11 @@ func parseDirAttr(sourceName string) DirAttr {
 		name = mustTrimPrefix(name, privatePrefix)
 		private = true
 	}
-	if strings.HasPrefix(name, dotPrefix) {
+	switch {
+	case strings.HasPrefix(name, dotPrefix):
 		name = "." + mustTrimPrefix(name, dotPrefix)
+	case strings.HasPrefix(name, literalPrefix):
+		name = name[len(literalPrefix):]
 	}
 	return DirAttr{
 		TargetName: name,
@@ -73,17 +76,20 @@ func (da DirAttr) SourceName() string {
 	if da.Private {
 		sourceName += privatePrefix
 	}
-	if strings.HasPrefix(da.TargetName, ".") {
+	switch {
+	case strings.HasPrefix(da.TargetName, "."):
 		sourceName += dotPrefix + mustTrimPrefix(da.TargetName, ".")
-	} else {
+	case dirPrefixRegexp.MatchString(da.TargetName):
+		sourceName += literalPrefix + da.TargetName
+	default:
 		sourceName += da.TargetName
 	}
 	return sourceName
 }
 
 // perm returns da's file mode.
-func (da DirAttr) perm() os.FileMode {
-	perm := os.FileMode(0o777)
+func (da DirAttr) perm() fs.FileMode {
+	perm := fs.FileMode(0o777)
 	if da.Private {
 		perm &^= 0o77
 	}
@@ -166,15 +172,24 @@ func parseFileAttr(sourceName, encryptedSuffix string) FileAttr {
 			executable = true
 		}
 	}
-	if strings.HasPrefix(name, dotPrefix) {
+	switch {
+	case strings.HasPrefix(name, dotPrefix):
 		name = "." + mustTrimPrefix(name, dotPrefix)
+	case strings.HasPrefix(name, literalPrefix):
+		name = name[len(literalPrefix):]
 	}
 	if encrypted {
 		name = strings.TrimSuffix(name, encryptedSuffix)
 	}
-	if strings.HasSuffix(name, TemplateSuffix) {
+	switch {
+	case strings.HasSuffix(name, literalSuffix):
+		name = mustTrimSuffix(name, literalSuffix)
+	case strings.HasSuffix(name, TemplateSuffix):
 		name = mustTrimSuffix(name, TemplateSuffix)
 		template = true
+		if strings.HasSuffix(name, literalSuffix) {
+			name = mustTrimSuffix(name, literalSuffix)
+		}
 	}
 	return FileAttr{
 		TargetName: name,
@@ -239,10 +254,16 @@ func (fa FileAttr) SourceName(encryptedSuffix string) string {
 	case SourceFileTypeSymlink:
 		sourceName = symlinkPrefix
 	}
-	if strings.HasPrefix(fa.TargetName, ".") {
+	switch {
+	case strings.HasPrefix(fa.TargetName, "."):
 		sourceName += dotPrefix + mustTrimPrefix(fa.TargetName, ".")
-	} else {
+	case filePrefixRegexp.MatchString(fa.TargetName):
+		sourceName += literalPrefix + fa.TargetName
+	default:
 		sourceName += fa.TargetName
+	}
+	if fileSuffixRegexp.MatchString(fa.TargetName) {
+		sourceName += literalSuffix
 	}
 	if fa.Template {
 		sourceName += TemplateSuffix
@@ -254,8 +275,8 @@ func (fa FileAttr) SourceName(encryptedSuffix string) string {
 }
 
 // perm returns fa's permissions.
-func (fa FileAttr) perm() os.FileMode {
-	perm := os.FileMode(0o666)
+func (fa FileAttr) perm() fs.FileMode {
+	perm := fs.FileMode(0o666)
 	if fa.Executable {
 		perm |= 0o111
 	}

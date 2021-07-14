@@ -1,22 +1,24 @@
-# chezmoi Frequently Asked Questions
+# chezmoi frequently asked questions
 
 <!--- toc --->
 * [How can I quickly check for problems with chezmoi on my machine?](#how-can-i-quickly-check-for-problems-with-chezmoi-on-my-machine)
+* [How do I edit my dotfiles with chezmoi?](#how-do-i-edit-my-dotfiles-with-chezmoi)
+* [Do I have to use `chezmoi edit` to edit my dotfiles?](#do-i-have-to-use-chezmoi-edit-to-edit-my-dotfiles)
 * [What are the consequences of "bare" modifications to the target files? If my `.zshrc` is managed by chezmoi and I edit `~/.zshrc` without using `chezmoi edit`, what happens?](#what-are-the-consequences-of-bare-modifications-to-the-target-files-if-my-zshrc-is-managed-by-chezmoi-and-i-edit-zshrc-without-using-chezmoi-edit-what-happens)
 * [How can I tell what dotfiles in my home directory aren't managed by chezmoi? Is there an easy way to have chezmoi manage a subset of them?](#how-can-i-tell-what-dotfiles-in-my-home-directory-arent-managed-by-chezmoi-is-there-an-easy-way-to-have-chezmoi-manage-a-subset-of-them)
 * [How can I tell what dotfiles in my home directory are currently managed by chezmoi?](#how-can-i-tell-what-dotfiles-in-my-home-directory-are-currently-managed-by-chezmoi)
 * [If there's a mechanism in place for the above, is there also a way to tell chezmoi to ignore specific files or groups of files (e.g. by directory name or by glob)?](#if-theres-a-mechanism-in-place-for-the-above-is-there-also-a-way-to-tell-chezmoi-to-ignore-specific-files-or-groups-of-files-eg-by-directory-name-or-by-glob)
 * [If the target already exists, but is "behind" the source, can chezmoi be configured to preserve the target version before replacing it with one derived from the source?](#if-the-target-already-exists-but-is-behind-the-source-can-chezmoi-be-configured-to-preserve-the-target-version-before-replacing-it-with-one-derived-from-the-source)
 * [Once I've made a change to the source directory, how do I commit it?](#once-ive-made-a-change-to-the-source-directory-how-do-i-commit-it)
-* [How do I only run a script when a file has changed?](#how-do-i-only-run-a-script-when-a-file-has-changed)
 * [I've made changes to both the destination state and the source state that I want to keep. How can I keep them both?](#ive-made-changes-to-both-the-destination-state-and-the-source-state-that-i-want-to-keep-how-can-i-keep-them-both)
 * [Why does chezmoi convert all my template variables to lowercase?](#why-does-chezmoi-convert-all-my-template-variables-to-lowercase)
 * [chezmoi makes `~/.ssh/config` group writeable. How do I stop this?](#chezmoi-makes-sshconfig-group-writeable-how-do-i-stop-this)
+* [Why does `chezmoi cd` spawn a shell instead of just changing directory?](#why-does-chezmoi-cd-spawn-a-shell-instead-of-just-changing-directory)
 * [Why doesn't chezmoi use symlinks like GNU Stow?](#why-doesnt-chezmoi-use-symlinks-like-gnu-stow)
-* [Do I have to use `chezmoi edit` to edit my dotfiles?](#do-i-have-to-use-chezmoi-edit-to-edit-my-dotfiles)
 * [Can I change how chezmoi's source state is represented on disk?](#can-i-change-how-chezmois-source-state-is-represented-on-disk)
 * [gpg encryption fails. What could be wrong?](#gpg-encryption-fails-what-could-be-wrong)
-* [chezmoi reports "user: lookup userid NNNNN: input/output error"](#chezmoi-reports-user-lookup-userid-nnnnn-inputoutput-error)
+* [chezmoi reports `chezmoi: user: lookup userid NNNNN: input/output error`](#chezmoi-reports-chezmoi-user-lookup-userid-nnnnn-inputoutput-error)
+* [chezmoi reports `chezmoi: timeout` or `chezmoi: timeout obtaining persistent state lock`](#chezmoi-reports-chezmoi-timeout-or-chezmoi-timeout-obtaining-persistent-state-lock)
 * [I'm getting errors trying to build chezmoi from source](#im-getting-errors-trying-to-build-chezmoi-from-source)
 * [What inspired chezmoi?](#what-inspired-chezmoi)
 * [Why not use Ansible/Chef/Puppet/Salt, or similar to manage my dotfiles instead?](#why-not-use-ansiblechefpuppetsalt-or-similar-to-manage-my-dotfiles-instead)
@@ -30,10 +32,47 @@
 
 Run:
 
-    chezmoi doctor
+```console
+$ chezmoi doctor
+```
 
 Anything `ok` is fine, anything `warning` is only a problem if you want to use
 the related feature, and anything `error` indicates a definite problem.
+
+## How do I edit my dotfiles with chezmoi?
+
+There are four popular approaches:
+
+1. Use `chezmoi edit $FILE`. This will open the source file for `$FILE` in your
+   editor, including . For extra ease, use `chezmoi edit --apply $FILE` to apply
+   the changes when you quit your editor.
+2. Use `chezmoi cd` and edit the files in the source directory directly. Run
+   `chezmoi diff` to see what changes would be made, and `chezmoi apply` to make
+   the changes.
+3. If your editor supports opening directories, run `chezmoi edit` with no
+   arguments to open the source directory.
+4. Edit the file in your home directory, and then either re-add it by running
+   `chezmoi add $FILE` or `chezmoi re-add`. Note that `re-add` doesn't work with
+   templates.
+
+## Do I have to use `chezmoi edit` to edit my dotfiles?
+
+No. `chezmoi edit` is a convenience command that has a couple of useful
+features, but you don't have to use it. You can also run `chezmoi cd` and then
+just edit the files in the source state directly. After saving an edited file
+you can run `chezmoi diff` to check what effect the changes would have, and run
+`chezmoi apply` if you're happy with them.
+
+`chezmoi edit` provides the following useful features:
+* It opens the correct file in the source state for you, so you don't have to
+  know anything about source state attributes.
+* If the dotfile is encrypted in the source state, then `chezmoi edit` will
+  decrypt it to a private directory, open that file in your `$EDITOR`, and then
+  re-encrypt the file when you quit your editor. That makes encryption more
+  transparent to the user. With the `--diff` and `--apply` options you can see
+  what would change and apply those changes without having to run `chezmoi diff`
+  or `chezmoi apply`. Note also that the arguments to `chezmoi edit` are the
+  files in their target location.
 
 ## What are the consequences of "bare" modifications to the target files? If my `.zshrc` is managed by chezmoi and I edit `~/.zshrc` without using `chezmoi edit`, what happens?
 
@@ -78,54 +117,9 @@ You have several options:
   directory and pass extra arguments to the command. If you're passing any
   flags, you'll need to use `--` to prevent chezmoi from consuming them, for
   example `chezmoi git -- commit -m "Update dotfiles"`.
-* You can configure chemzoi to automatically commit and push changes to your
+* You can configure chezmoi to automatically commit and push changes to your
   source state, as [described in the how-to
   guide](https://github.com/twpayne/chezmoi/blob/master/docs/HOWTO.md#automatically-commit-and-push-changes-to-your-repo).
-
-## How do I only run a script when a file has changed?
-
-A common example of this is that you're using [Homebrew](https://brew.sh/) and
-have `.Brewfile` listing all the packages that you want installed and only want
-to run `brew bundle --global` when the contents of `.Brewfile` have changed.
-
-chezmoi has two types of scripts: scripts that run every time, and scripts that
-only run when their contents change. chezmoi does not have a mechanism to run a
-script when an arbitrary file has changed, but there are some ways to achieve
-the desired behavior:
-
-1. Have the script create `.Brewfile` instead of chezmoi, e.g. in your
-   `run_once_install-packages`:
-
-   ```sh
-   #!/bin/sh
-
-   cat > $HOME/.Brewfile <<EOF
-   brew "imagemagick"
-   brew "openssl"
-   EOF
-
-   brew bundle --global
-   ```
-
-2. Don't use `.Brewfile`, and instead install the packages explicitly in
-   `run_once_install-packages`:
-
-   ```sh
-   #!/bin/sh
-
-   brew install imagemagick || true
-   brew install openssl || true
-   ```
-
-   The `|| true` is necessary because `brew install` exits with failure if the
-   package is already installed.
-
-3. Use a script that runs every time (not just once) and rely on `brew bundle
-   --global` being idempotent.
-
-4. Use a script that runs every time, records a checksum of `.Brewfile` in
-   another file, and only runs `brew bundle --global` if the checksum has
-   changed, and updates the recorded checksum after.
 
 ## I've made changes to both the destination state and the source state that I want to keep. How can I keep them both?
 
@@ -149,7 +143,9 @@ that files and directories are group writeable by default.
 You can override this for chezmoi by setting the `umask` configuration variable
 in your configuration file, for example:
 
-    umask = 0o022
+```toml
+umask = 0o022
+```
 
 Note that this will apply to all files and directories that chezmoi manages and
 will ensure that none of them are group writeable. It is not currently possible
@@ -158,6 +154,20 @@ to control group write permissions for individual files or directories. Please
 GitHub](https://github.com/twpayne/chezmoi/issues/new?assignees=&labels=enhancement&template=02_feature_request.md&title=)
 if you need this.
 
+## Why does `chezmoi cd` spawn a shell instead of just changing directory?
+
+`chezmoi cd` spawns a shell because it is not possible for a program to change
+the working directory of its parent process. You can add a shell function instead:
+
+```bash
+chezmoi-cd() {
+    cd $(chezmoi source-path)
+}
+```
+
+Typing `chezmoi-cd` will then change the directory of your current shell to
+chezmoi's source directory.
+
 ## Why doesn't chezmoi use symlinks like GNU Stow?
 
 Symlinks are first class citizens in chezmoi: chezmoi supports creating them,
@@ -165,7 +175,7 @@ updating them, removing them, and even more advanced features not found
 elsewhere like having the same symlink point to different targets on different
 machines by using templates.
 
-With chezmoi, you only use a symlink where you really want a symlink, in
+With chezmoi, you only use a symlink where you really need a symlink, in
 contrast to some other dotfile managers (e.g. GNU Stow) which require the use of
 symlinks as a layer of indirection between a dotfile's location (which can be
 anywhere in your home directory) and a dotfile's content (which needs to be in a
@@ -173,13 +183,14 @@ centralized directory that you manage with version control). chezmoi solves this
 problem in a different way.
 
 Instead of using a symlink to redirect from the dotfile's location to the
-centralized directory, chezmoi generates the dotfile in its final location from
-the contents of the centralized directory. Not only is no symlink is needed,
-this has the advantages that chezmoi is better able to cope with differences
-from machine to machine (as a dotfile's contents can be unique to that machine)
-and the dotfiles that chezmoi creates are just regular files. There's nothing
-special about dotfiles managed by chezmoi, whereas dotfiles managed with GNU
-Stow are special because they're actually symlinks to somewhere else.
+centralized directory, chezmoi generates the dotfile as a regular file in its
+final location from the contents of the centralized directory. This approach
+means that symlinks are not needed for regular files and that chezmoi is better
+able to cope with differences from machine to machine (as a dotfile's contents
+can be unique to that machine) and the dotfiles that chezmoi creates are just
+regular files. There's nothing special about dotfiles managed by chezmoi,
+whereas dotfiles managed with GNU Stow are special because they're actually
+symlinks to somewhere else.
 
 The only advantage to using GNU Stow-style symlinks is that changes that you
 make to the dotfile's contents in the centralized directory are immediately
@@ -196,44 +207,16 @@ for example) but it does need some convincing use cases that demonstrate that a
 symlink from a dotfile's location to its contents in a central directory is
 better than just having the correct dotfile contents.
 
-## Do I have to use `chezmoi edit` to edit my dotfiles?
-
-No. `chezmoi edit` is a convenience command that has a couple of useful
-features, but you don't have to use it. You can also run `chezmoi cd` and then
-just edit the files in the source state directly. After saving an edited file
-you can run `chezmoi diff` to check what effect the changes would have, and run
-`chezmoi apply` if you're happy with them.
-
-`chezmoi edit` provides the following useful features:
-* It opens the correct file in the source state for you, so you don't have to
-  know anything about source state attributes.
-* If the dotfile is encrypted in the source state, then `chezmoi edit` will
-  decrypt it to a private directory, open that file in your `$EDITOR`, and then
-  re-encrypt the file when you quit your editor. That makes encryption more
-  transparent to the user. With the `--diff` and `--apply` options you can see
-  what would change and apply those changes without having to run `chezmoi diff`
-  or `chezmoi apply`. Note also that the arguments to `chezmoi edit` are the
-  files in their target location.
-
 ## Can I change how chezmoi's source state is represented on disk?
 
 There are a number of criticisms of how chezmoi's source state is represented on
 disk:
 
-1. The source file naming system cannot handle all possible filenames.
-2. Not all possible file permissions can be represented.
-3. The long source file names are weird and verbose.
-4. Everything is in a single directory, which can end up containing many entries.
+1. Not all possible file permissions can be represented.
+2. The long source file names are weird and verbose.
+3. Everything is in a single directory, which can end up containing many entries.
 
 chezmoi's source state representation is a deliberate, practical compromise.
-
-Certain target filenames, for example `~/dot_example`, are incompatible with
-chezmoi's
-[attributes](https://github.com/twpayne/chezmoi/blob/master/docs/REFERENCE.md#source-state-attributes)
-used in the source state. In practice, dotfile filenames are unlikely to
-conflict with chezmoi's attributes. If this does cause a genuine problem for
-you, please [open an issue on
-GitHub](https://github.com/twpayne/chezmoi/issues/new/choose).
 
 The `dot_` attribute makes it transparent which dotfiles are managed by chezmoi
 and which files are ignored by chezmoi. chezmoi ignores all files and
@@ -310,33 +293,55 @@ The `gpg.recipient` key should be ultimately trusted, otherwise encryption will
 fail because gpg will prompt for input, which chezmoi does not handle. You can
 check the trust level by running:
 
-    gpg --export-ownertrust
+```console
+$ gpg --export-ownertrust
+```
 
 The trust level for the recipient's key should be `6`. If it is not, you can
 change the trust level by running:
 
-    gpg --edit-key $recipient
+```console
+$ gpg --edit-key $recipient
+```
 
 Enter `trust` at the prompt and chose `5 = I trust ultimately`.
 
-## chezmoi reports "user: lookup userid NNNNN: input/output error"
+## chezmoi reports `chezmoi: user: lookup userid NNNNN: input/output error`
 
 This is likely because the chezmoi binary you are using was statically compiled
 with [musl](https://musl.libc.org/) and the machine you are running on uses
 LDAP or NIS.
 
-The immediate fix is to use a package built for your distriubtion (e.g a `.deb`
+The immediate fix is to use a package built for your distribution (e.g a `.deb`
 or `.rpm`) which is linked against glibc and includes LDAP/NIS support instead
 of the statically-compiled binary.
 
 If the problem still persists, then please [open an issue on
 GitHub](https://github.com/twpayne/chezmoi/issues/new/choose).
 
+## chezmoi reports `chezmoi: timeout` or `chezmoi: timeout obtaining persistent state lock`
+
+chezmoi will report this when it is unable to lock its persistent state
+(`~/.config/chezmoi/chezmoistate.boltdb`), typically because another instance of
+chezmoi is currently running and holding the lock.
+
+This can happen, for example, if you have a `run_` script that invokes
+`chezmoi`, or are running chezmoi in another window.
+
+Under the hood, chezmoi uses [bbolt](https://github.com/etcd-io/bbolt) which
+permits multiple simultaneous readers, but only one writer (with no readers).
+
+Commands that take a write lock include `add`, `apply`, `edit`, `forget`,
+`import`, `init`, `state`, `unmanage`, and `update`. Commands that take a read
+lock include `diff`, `status`, and `verify`.
+
 ## I'm getting errors trying to build chezmoi from source
 
 chezmoi requires Go version 1.16 or later. You can check the version of Go with:
 
-    go version
+```console
+$ go version
+```
 
 For more details on building chezmoi, see the [Contributing
 Guide]([CONTRIBUTING.md](https://github.com/twpayne/chezmoi/blob/master/docs/CONTRIBUTING.md)).
@@ -359,7 +364,7 @@ system management tools, chezmoi offers:
 * Easy installation and execution on every platform, without root access.
   Installing chezmoi requires only copying a single binary file with no external
   dependencies. Executing chezmoi just involves running the binary. In contrast,
-  installing and running a whole system management tools typically requires
+  installing and running a whole system management tool typically requires
   installing a scripting language runtime, several packages, and running a
   system service, all typically requiring root access.
 

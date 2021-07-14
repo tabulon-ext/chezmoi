@@ -1,7 +1,7 @@
 package chezmoi
 
 import (
-	"os"
+	"io/fs"
 	"path/filepath"
 	"testing"
 	"text/template"
@@ -9,23 +9,23 @@ import (
 	"github.com/coreos/go-semver/semver"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	vfs "github.com/twpayne/go-vfs/v2"
-	"github.com/twpayne/go-vfs/v2/vfst"
+	vfs "github.com/twpayne/go-vfs/v3"
+	"github.com/twpayne/go-vfs/v3/vfst"
 
-	"github.com/twpayne/chezmoi/internal/chezmoitest"
+	"github.com/twpayne/chezmoi/v2/internal/chezmoitest"
 )
 
 func TestSourceStateAdd(t *testing.T) {
 	for _, tc := range []struct {
 		name         string
-		destAbsPaths AbsPaths
+		destAbsPaths []AbsPath
 		addOptions   AddOptions
 		extraRoot    interface{}
 		tests        []interface{}
 	}{
 		{
 			name: "dir",
-			destAbsPaths: AbsPaths{
+			destAbsPaths: []AbsPath{
 				"/home/user/.dir",
 			},
 			addOptions: AddOptions{
@@ -46,7 +46,7 @@ func TestSourceStateAdd(t *testing.T) {
 		},
 		{
 			name: "dir_change_attributes",
-			destAbsPaths: AbsPaths{
+			destAbsPaths: []AbsPath{
 				"/home/user/.dir",
 			},
 			addOptions: AddOptions{
@@ -74,7 +74,7 @@ func TestSourceStateAdd(t *testing.T) {
 		},
 		{
 			name: "dir_file",
-			destAbsPaths: AbsPaths{
+			destAbsPaths: []AbsPath{
 				"/home/user/.dir/file",
 			},
 			addOptions: AddOptions{
@@ -94,7 +94,7 @@ func TestSourceStateAdd(t *testing.T) {
 		},
 		{
 			name: "dir_file_existing_dir",
-			destAbsPaths: AbsPaths{
+			destAbsPaths: []AbsPath{
 				"/home/user/.dir/file",
 			},
 			addOptions: AddOptions{
@@ -112,7 +112,7 @@ func TestSourceStateAdd(t *testing.T) {
 		},
 		{
 			name: "dir_subdir",
-			destAbsPaths: AbsPaths{
+			destAbsPaths: []AbsPath{
 				"/home/user/.dir/subdir",
 			},
 			addOptions: AddOptions{
@@ -134,7 +134,7 @@ func TestSourceStateAdd(t *testing.T) {
 		},
 		{
 			name: "dir_subdir_file",
-			destAbsPaths: AbsPaths{
+			destAbsPaths: []AbsPath{
 				"/home/user/.dir/subdir/file",
 			},
 			addOptions: AddOptions{
@@ -161,7 +161,7 @@ func TestSourceStateAdd(t *testing.T) {
 		},
 		{
 			name: "dir_subdir_file_existing_dir_subdir",
-			destAbsPaths: AbsPaths{
+			destAbsPaths: []AbsPath{
 				"/home/user/.dir/subdir/file",
 			},
 			addOptions: AddOptions{
@@ -179,7 +179,7 @@ func TestSourceStateAdd(t *testing.T) {
 		},
 		{
 			name: "empty",
-			destAbsPaths: AbsPaths{
+			destAbsPaths: []AbsPath{
 				"/home/user/.empty",
 			},
 			addOptions: AddOptions{
@@ -193,7 +193,7 @@ func TestSourceStateAdd(t *testing.T) {
 		},
 		{
 			name: "empty_with_empty",
-			destAbsPaths: AbsPaths{
+			destAbsPaths: []AbsPath{
 				"/home/user/.empty",
 			},
 			addOptions: AddOptions{
@@ -210,7 +210,7 @@ func TestSourceStateAdd(t *testing.T) {
 		},
 		{
 			name: "executable_unix",
-			destAbsPaths: AbsPaths{
+			destAbsPaths: []AbsPath{
 				"/home/user/.executable",
 			},
 			addOptions: AddOptions{
@@ -226,7 +226,7 @@ func TestSourceStateAdd(t *testing.T) {
 		},
 		{
 			name: "executable_windows",
-			destAbsPaths: AbsPaths{
+			destAbsPaths: []AbsPath{
 				"/home/user/.executable",
 			},
 			addOptions: AddOptions{
@@ -242,7 +242,7 @@ func TestSourceStateAdd(t *testing.T) {
 		},
 		{
 			name: "create",
-			destAbsPaths: AbsPaths{
+			destAbsPaths: []AbsPath{
 				"/home/user/.create",
 			},
 			addOptions: AddOptions{
@@ -259,7 +259,7 @@ func TestSourceStateAdd(t *testing.T) {
 		},
 		{
 			name: "file",
-			destAbsPaths: AbsPaths{
+			destAbsPaths: []AbsPath{
 				"/home/user/.file",
 			},
 			addOptions: AddOptions{
@@ -275,7 +275,7 @@ func TestSourceStateAdd(t *testing.T) {
 		},
 		{
 			name: "file_change_attributes",
-			destAbsPaths: AbsPaths{
+			destAbsPaths: []AbsPath{
 				"/home/user/.file",
 			},
 			addOptions: AddOptions{
@@ -297,7 +297,7 @@ func TestSourceStateAdd(t *testing.T) {
 		},
 		{
 			name: "file_replace_contents",
-			destAbsPaths: AbsPaths{
+			destAbsPaths: []AbsPath{
 				"/home/user/.file",
 			},
 			addOptions: AddOptions{
@@ -316,7 +316,7 @@ func TestSourceStateAdd(t *testing.T) {
 		},
 		{
 			name: "private_unix",
-			destAbsPaths: AbsPaths{
+			destAbsPaths: []AbsPath{
 				"/home/user/.private",
 			},
 			addOptions: AddOptions{
@@ -332,7 +332,7 @@ func TestSourceStateAdd(t *testing.T) {
 		},
 		{
 			name: "private_windows",
-			destAbsPaths: AbsPaths{
+			destAbsPaths: []AbsPath{
 				"/home/user/.private",
 			},
 			addOptions: AddOptions{
@@ -348,7 +348,7 @@ func TestSourceStateAdd(t *testing.T) {
 		},
 		{
 			name: "symlink",
-			destAbsPaths: AbsPaths{
+			destAbsPaths: []AbsPath{
 				"/home/user/.symlink",
 			},
 			addOptions: AddOptions{
@@ -363,7 +363,7 @@ func TestSourceStateAdd(t *testing.T) {
 		},
 		{
 			name: "symlink_backslash_windows",
-			destAbsPaths: AbsPaths{
+			destAbsPaths: []AbsPath{
 				"/home/user/.symlink_windows",
 			},
 			addOptions: AddOptions{
@@ -383,7 +383,7 @@ func TestSourceStateAdd(t *testing.T) {
 		},
 		{
 			name: "template",
-			destAbsPaths: AbsPaths{
+			destAbsPaths: []AbsPath{
 				"/home/user/.template",
 			},
 			addOptions: AddOptions{
@@ -400,7 +400,7 @@ func TestSourceStateAdd(t *testing.T) {
 		},
 		{
 			name: "dir_and_dir_file",
-			destAbsPaths: AbsPaths{
+			destAbsPaths: []AbsPath{
 				"/home/user/.dir",
 				"/home/user/.dir/file",
 			},
@@ -421,7 +421,7 @@ func TestSourceStateAdd(t *testing.T) {
 		},
 		{
 			name: "file_in_dir_exact_subdir",
-			destAbsPaths: AbsPaths{
+			destAbsPaths: []AbsPath{
 				"/home/user/.dir/subdir/file",
 			},
 			addOptions: AddOptions{
@@ -468,8 +468,8 @@ func TestSourceStateAdd(t *testing.T) {
 					".symlink":  &vfst.Symlink{Target: ".dir/subdir/file"},
 					".template": "key = value\n",
 				},
-			}, func(fs vfs.FS) {
-				system := NewRealSystem(fs)
+			}, func(fileSystem vfs.FS) {
+				system := NewRealSystem(fileSystem)
 				persistentState := NewMockPersistentState()
 				if tc.extraRoot != nil {
 					require.NoError(t, vfst.NewBuilder().Build(system.UnderlyingFS(), tc.extraRoot))
@@ -486,13 +486,13 @@ func TestSourceStateAdd(t *testing.T) {
 				require.NoError(t, s.Read())
 				requireEvaluateAll(t, s, system)
 
-				destAbsPathInfos := make(map[AbsPath]os.FileInfo)
+				destAbsPathInfos := make(map[AbsPath]fs.FileInfo)
 				for _, destAbsPath := range tc.destAbsPaths {
 					require.NoError(t, s.AddDestAbsPathInfos(destAbsPathInfos, system, destAbsPath, nil))
 				}
 				require.NoError(t, s.Add(system, persistentState, system, destAbsPathInfos, &tc.addOptions))
 
-				vfst.RunTests(t, fs, "", tc.tests...)
+				vfst.RunTests(t, fileSystem, "", tc.tests...)
 			})
 		})
 	}
@@ -672,7 +672,7 @@ func TestSourceStateApplyAll(t *testing.T) {
 			},
 			tests: []interface{}{
 				vfst.TestPath("/home/user/.symlink",
-					vfst.TestModeType(os.ModeSymlink),
+					vfst.TestModeType(fs.ModeSymlink),
 					vfst.TestSymlinkTarget(filepath.FromSlash(".dir/subdir/file")),
 				),
 			},
@@ -688,15 +688,15 @@ func TestSourceStateApplyAll(t *testing.T) {
 			},
 			tests: []interface{}{
 				vfst.TestPath("/home/user/.symlink",
-					vfst.TestModeType(os.ModeSymlink),
+					vfst.TestModeType(fs.ModeSymlink),
 					vfst.TestSymlinkTarget(filepath.FromSlash(".dir/subdir/file")),
 				),
 			},
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			chezmoitest.WithTestFS(t, tc.root, func(fs vfs.FS) {
-				system := NewRealSystem(fs)
+			chezmoitest.WithTestFS(t, tc.root, func(fileSystem vfs.FS) {
+				system := NewRealSystem(fileSystem)
 				persistentState := NewMockPersistentState()
 				sourceStateOptions := []SourceStateOption{
 					WithDestDir("/home/user"),
@@ -712,7 +712,7 @@ func TestSourceStateApplyAll(t *testing.T) {
 					Umask:   chezmoitest.Umask,
 				}))
 
-				vfst.RunTests(t, fs, "", tc.tests...)
+				vfst.RunTests(t, fileSystem, "", tc.tests...)
 			})
 		})
 	}
@@ -736,7 +736,9 @@ func TestSourceStateRead(t *testing.T) {
 			name: "dir",
 			root: map[string]interface{}{
 				"/home/user/.local/share/chezmoi": map[string]interface{}{
-					"dir": &vfst.Dir{Perm: 0o777},
+					"dir": &vfst.Dir{
+						Perm: 0o777 &^ chezmoitest.Umask,
+					},
 				},
 			},
 			expectedSourceState: NewSourceState(
@@ -747,7 +749,7 @@ func TestSourceStateRead(t *testing.T) {
 							TargetName: "dir",
 						},
 						targetStateEntry: &TargetStateDir{
-							perm: 0o777,
+							perm: 0o777 &^ chezmoitest.Umask,
 						},
 					},
 				}),
@@ -770,7 +772,7 @@ func TestSourceStateRead(t *testing.T) {
 						},
 						lazyContents: newLazyContents([]byte("# contents of .file\n")),
 						targetStateEntry: &TargetStateFile{
-							perm:         0o666,
+							perm:         0o666 &^ chezmoitest.Umask,
 							lazyContents: newLazyContents([]byte("# contents of .file\n")),
 						},
 					},
@@ -791,8 +793,12 @@ func TestSourceStateRead(t *testing.T) {
 			name: "duplicate_target_dir",
 			root: map[string]interface{}{
 				"/home/user/.local/share/chezmoi": map[string]interface{}{
-					"dir":       &vfst.Dir{Perm: 0o777},
-					"exact_dir": &vfst.Dir{Perm: 0o777},
+					"dir": &vfst.Dir{
+						Perm: 0o777 &^ chezmoitest.Umask,
+					},
+					"exact_dir": &vfst.Dir{
+						Perm: 0o777 &^ chezmoitest.Umask,
+					},
 				},
 			},
 			expectedError: "dir: duplicate source state entries (dir, exact_dir)",
@@ -826,7 +832,7 @@ func TestSourceStateRead(t *testing.T) {
 						},
 						lazyContents: newLazyContents([]byte("# contents of .file\n")),
 						targetStateEntry: &TargetStateFile{
-							perm:         0o777,
+							perm:         0o777 &^ chezmoitest.Umask,
 							lazyContents: newLazyContents([]byte("# contents of .file\n")),
 						},
 					},
@@ -922,7 +928,7 @@ func TestSourceStateRead(t *testing.T) {
 							TargetName: "dir",
 						},
 						targetStateEntry: &TargetStateDir{
-							perm: 0o777,
+							perm: 0o777 &^ chezmoitest.Umask,
 						},
 					},
 					"dir/file": &SourceStateFile{
@@ -931,14 +937,10 @@ func TestSourceStateRead(t *testing.T) {
 							TargetName: "file",
 							Type:       SourceFileTypeFile,
 						},
-						lazyContents: &lazyContents{
-							contents: []byte("# contents of .dir/file\n"),
-						},
+						lazyContents: newLazyContents([]byte("# contents of .dir/file\n")),
 						targetStateEntry: &TargetStateFile{
-							perm: 0o666,
-							lazyContents: &lazyContents{
-								contents: []byte("# contents of .dir/file\n"),
-							},
+							perm:         0o666 &^ chezmoitest.Umask,
+							lazyContents: newLazyContents([]byte("# contents of .dir/file\n")),
 						},
 					},
 				}),
@@ -999,7 +1001,7 @@ func TestSourceStateRead(t *testing.T) {
 							Exact:      true,
 						},
 						targetStateEntry: &TargetStateDir{
-							perm: 0o777,
+							perm: 0o777 &^ chezmoitest.Umask,
 						},
 					},
 					"dir/file1": &SourceStateFile{
@@ -1008,14 +1010,10 @@ func TestSourceStateRead(t *testing.T) {
 							TargetName: "file1",
 							Type:       SourceFileTypeFile,
 						},
-						lazyContents: &lazyContents{
-							contents: []byte("# contents of dir/file1\n"),
-						},
+						lazyContents: newLazyContents([]byte("# contents of dir/file1\n")),
 						targetStateEntry: &TargetStateFile{
-							perm: 0o666,
-							lazyContents: &lazyContents{
-								contents: []byte("# contents of dir/file1\n"),
-							},
+							perm:         0o666 &^ chezmoitest.Umask,
+							lazyContents: newLazyContents([]byte("# contents of dir/file1\n")),
 						},
 					},
 					"dir/file2": &SourceStateRemove{
@@ -1122,7 +1120,7 @@ func TestSourceStateRead(t *testing.T) {
 							TargetName: "dir",
 						},
 						targetStateEntry: &TargetStateDir{
-							perm: 0o777,
+							perm: 0o777 &^ chezmoitest.Umask,
 						},
 					},
 				}),
@@ -1157,8 +1155,8 @@ func TestSourceStateRead(t *testing.T) {
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			chezmoitest.WithTestFS(t, tc.root, func(fs vfs.FS) {
-				system := NewRealSystem(fs)
+			chezmoitest.WithTestFS(t, tc.root, func(fileSystem vfs.FS) {
+				system := NewRealSystem(fileSystem)
 				s := NewSourceState(
 					WithDestDir("/home/user"),
 					WithSourceDir("/home/user/.local/share/chezmoi"),
@@ -1187,12 +1185,12 @@ func TestSourceStateTargetRelPaths(t *testing.T) {
 	for _, tc := range []struct {
 		name                   string
 		root                   interface{}
-		expectedTargetRelPaths RelPaths
+		expectedTargetRelPaths []RelPath
 	}{
 		{
 			name:                   "empty",
 			root:                   nil,
-			expectedTargetRelPaths: RelPaths{},
+			expectedTargetRelPaths: []RelPath{},
 		},
 		{
 			name: "scripts",
@@ -1209,7 +1207,7 @@ func TestSourceStateTargetRelPaths(t *testing.T) {
 					"run_after_3after":   "",
 				},
 			},
-			expectedTargetRelPaths: RelPaths{
+			expectedTargetRelPaths: []RelPath{
 				"1before",
 				"2before",
 				"3before",
@@ -1223,10 +1221,10 @@ func TestSourceStateTargetRelPaths(t *testing.T) {
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			chezmoitest.WithTestFS(t, tc.root, func(fs vfs.FS) {
+			chezmoitest.WithTestFS(t, tc.root, func(fileSystem vfs.FS) {
 				s := NewSourceState(
 					WithSourceDir("/home/user/.local/share/chezmoi"),
-					WithSystem(NewRealSystem(fs)),
+					WithSystem(NewRealSystem(fileSystem)),
 				)
 				require.NoError(t, s.Read())
 				assert.Equal(t, tc.expectedTargetRelPaths, s.TargetRelPaths())

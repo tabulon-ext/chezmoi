@@ -1,0 +1,70 @@
+[windows] skip 'UNIX only'
+[!umask:022] skip
+
+# test that scripts in subdirectories are run in the subdirectory
+chezmoi apply --force
+cmpenv stdout golden/apply
+
+chezmoi dump
+cmp stdout golden/dump
+
+chezmoi archive --gzip --output=archive.tar.gz
+exec tar -tzf archive.tar.gz
+cmp stdout golden/archive
+
+-- golden/apply --
+$HOME
+$HOME/dir
+$HOME/anotherdir
+-- golden/archive --
+otherdir/script
+anotherdir/
+dir/
+dir/script
+otherdir/
+anotherdir/script
+-- golden/dump --
+{
+  "anotherdir": {
+    "type": "dir",
+    "name": "anotherdir",
+    "perm": 493
+  },
+  "anotherdir/script": {
+    "type": "script",
+    "name": "anotherdir/script",
+    "contents": "#!/bin/sh\n\necho $PWD\n"
+  },
+  "dir": {
+    "type": "dir",
+    "name": "dir",
+    "perm": 493
+  },
+  "dir/script": {
+    "type": "script",
+    "name": "dir/script",
+    "contents": "#!/bin/sh\n\necho $PWD\n"
+  },
+  "otherdir": {
+    "type": "dir",
+    "name": "otherdir",
+    "perm": 493
+  },
+  "otherdir/script": {
+    "type": "script",
+    "name": "otherdir/script",
+    "contents": "#!/bin/sh\n\necho $PWD\n"
+  }
+}
+-- home/user/.local/share/chezmoi/anotherdir/run_after_script --
+#!/bin/sh
+
+echo $PWD
+-- home/user/.local/share/chezmoi/dir/run_script --
+#!/bin/sh
+
+echo $PWD
+-- home/user/.local/share/chezmoi/otherdir/run_before_script --
+#!/bin/sh
+
+echo $PWD

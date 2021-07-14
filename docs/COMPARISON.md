@@ -1,4 +1,4 @@
-# chezmoi Comparison guide
+# chezmoi comparison guide
 
 <!--- toc --->
 * [Comparison table](#comparison-table)
@@ -7,7 +7,7 @@
   * [Coping with differences between machines requires extra effort](#coping-with-differences-between-machines-requires-extra-effort)
   * [You have to keep your dotfiles repo private](#you-have-to-keep-your-dotfiles-repo-private)
   * [You have to maintain your own tool](#you-have-to-maintain-your-own-tool)
-  * [Setting up your dotfiles requires more than two short commands](#setting-up-your-dotfiles-requires-more-than-two-short-commands)
+  * [Setting up your dotfiles requires more than one short command](#setting-up-your-dotfiles-requires-more-than-one-short-command)
 
 ## Comparison table
 
@@ -22,36 +22,36 @@
 | -------------------------------------- | ------------- | ----------------- | ----------------- | ----------------- | ------------- | ---------- |
 | Distribution                           | Single binary | Python package    | Multiple files    | Ruby gem          | Single script | n/a        |
 | Install method                         | Many          | git submodule     | Many              | Ruby gem          | Many          | Manual     |
-| Non-root install on bare system        | Yes           | Difficult         | Difficult         | Difficult         | Yes           | Yes        |
-| Windows support                        | Yes           | No                | No                | No                | No            | Yes        |
+| Non-root install on bare system        | ✅           | Difficult         | Difficult         | Difficult         | ✅           | ✅        |
+| Windows support                        | ✅           | ❌                | ❌                | ❌                | ❌            | ✅        |
 | Bootstrap requirements                 | None          | Python, git       | Perl, git         | Ruby, git         | git           | git        |
 | Source repos                           | Single        | Single            | Multiple          | Single            | Single        | Single     |
 | dotfiles are...                        | Files         | Symlinks          | Files             | Symlinks          | Files         | Files      |
-| Config file                            | Optional      | Required          | Optional          | None              | None          | No         |
-| Private files                          | Yes           | No                | No                | No                | No            | No         |
-| Show differences without applying      | Yes           | No                | No                | No                | Yes           | Yes        |
-| Whole file encryption                  | Yes           | No                | No                | No                | Yes           | No         |
-| Password manager integration           | Yes           | No                | No                | No                | No            | No         |
+| Config file                            | Optional      | Required          | Optional          | None              | None          | Optional   |
+| Private files                          | ✅           | ❌                | ❌                | ❌                | ❌            | ❌         |
+| Show differences without applying      | ✅           | ❌                | ❌                | ❌                | ✅           | ✅        |
+| Whole file encryption                  | ✅           | ❌                | ❌                | ❌                | ✅           | ❌         |
+| Password manager integration           | ✅           | ❌                | ❌                | ❌                | ❌            | ❌         |
 | Machine-to-machine file differences    | Templates     | Alternative files | Alternative files | Alternative files | Templates     | Manual     |
-| Custom variables in templates          | Yes           | n/a               | n/a               | n/a               | No            | No         |
-| Executable files                       | Yes           | Yes               | Yes               | Yes               | No            | Yes        |
-| File creation with initial contents    | Yes           | No                | No                | No                | No            | No         |
-| Manage partial files                   | Yes           | No                | No                | No                | No            | No         |
-| File removal                           | Yes           | No                | No                | No                | No            | No         |
-| Directory creation                     | Yes           | Yes               | Yes               | No                | No            | Yes        |
-| Run scripts                            | Yes           | Yes               | Yes               | No                | No            | No         |
-| Run once scripts                       | Yes           | No                | No                | No                | Manual        | No         |
-| Machine-to-machine symlink differences | Yes           | No                | No                | No                | Yes           | No         |
-| Shell completion                       | Yes           | No                | No                | No                | Yes           | Yes        |
-| Archive import                         | Yes           | No                | No                | No                | No            | No         |
-| Archive export                         | Yes           | No                | No                | No                | No            | Yes        |
+| Custom variables in templates          | ✅           | ❌               | ❌               | ❌               | ❌            | ❌         |
+| Executable files                       | ✅           | ✅               | ✅               | ✅               | ❌            | ✅        |
+| File creation with initial contents    | ✅           | ❌                | ❌                | ❌                | ❌            | ❌         |
+| Manage partial files                   | ✅           | ❌                | ❌                | ❌                | ❌            | ❌         |
+| File removal                           | ✅           | ❌                | ❌                | ❌                | ❌            | ❌         |
+| Directory creation                     | ✅           | ✅               | ✅               | ❌                | ❌            | ✅        |
+| Run scripts                            | ✅           | ✅               | ✅               | ❌                | ❌            | ❌         |
+| Run once scripts                       | ✅           | ❌                | ❌                | ❌                | ❌            | ❌         |
+| Machine-to-machine symlink differences | ✅           | ❌                | ❌                | ❌                | ✅           | ❌         |
+| Shell completion                       | ✅           | ❌                | ❌                | ❌                | ✅           | ✅        |
+| Archive import                         | ✅           | ❌                | ❌                | ❌                | ❌            | ❌         |
+| Archive export                         | ✅           | ❌                | ❌                | ❌                | ❌            | ✅        |
 | Implementation language                | Go            | Python            | Perl              | Ruby              | Bash          | C          |
 
 For more comparisons, visit [dotfiles.github.io](https://dotfiles.github.io/).
 
 ## Why should I use a dotfile manager?
 
-Dotfile managers give you the combined the benefit of a consistent environment
+Dotfile managers give you the combined benefit of a consistent environment
 everywhere with an undo command and a restore from backup.
 
 As the core of our development environments become increasingly standardized
@@ -63,7 +63,7 @@ Codespaces](https://github.com/features/codespaces).
 
 chezmoi helps you bring your personal configuration to every environment that
 you're working in. In the same way that nobody would use an editor without an
-undo command, or develop software without a version control system, chemzoi
+undo command, or develop software without a version control system, chezmoi
 brings the investment that you have made in mastering your tools to every
 environment that you work in.
 
@@ -146,15 +146,15 @@ both unit and integration tests. When you hit the limits of your existing
 dotfile management system, chezmoi already has a tried-and-tested solution ready
 for you to use.
 
-### Setting up your dotfiles requires more than two short commands
+### Setting up your dotfiles requires more than one short command
 
 If your system is written in a scripting language like Python, Perl, or Ruby,
 then you also need to install a compatible version of that language's runtime
 before you can use your system.
 
 chezmoi is distributed as a single stand-alone statically-linked binary with no
-dependencies that you can simply copy onto your machine and run. chezmoi
-provides one-line installs, pre-built binaries, packages for Linux and BSD
-distributions, Homebrew formulae, Scoop and Chocolatey support on Windows, and a
-initial config file generation mechanism to make installing your dotfiles on a
-new machine as painless as possible.
+dependencies that you can simply copy onto your machine and run. You don't even
+need git installed. chezmoi provides one-line installs, pre-built binaries,
+packages for Linux and BSD distributions, Homebrew formulae, Scoop and
+Chocolatey support on Windows, and a initial config file generation mechanism to
+make installing your dotfiles on a new machine as painless as possible.

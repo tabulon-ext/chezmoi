@@ -1,4 +1,4 @@
-# chezmoi Reference Manual
+# chezmoi reference manual
 
 Manage your dotfiles securely across multiple machines.
 
@@ -7,11 +7,9 @@ Manage your dotfiles securely across multiple machines.
 * [Global command line flags](#global-command-line-flags)
   * [`--color` *value*](#--color-value)
   * [`-c`, `--config` *filename*](#-c---config-filename)
-  * [`--cpu-profile` *filename*](#--cpu-profile-filename)
   * [`--debug`](#--debug)
   * [`-D`, `--destination` *directory*](#-d---destination-directory)
   * [`-n`, `--dry-run`](#-n---dry-run)
-  * [`-x`, `--exclude` *types*](#-x---exclude-types)
   * [`--force`](#--force)
   * [`-h`, `--help`](#-h---help)
   * [`-k`, `--keep-going`](#-k---keep-going)
@@ -24,9 +22,13 @@ Manage your dotfiles securely across multiple machines.
   * [`-v`, `--verbose`](#-v---verbose)
   * [`--version`](#--version)
 * [Common command line flags](#common-command-line-flags)
-  * [`--format` *format*](#--format-format)
-  * [`--include` *types*](#--include-types)
+  * [`-f`, `--format` `json`|`yaml`](#-f---format-jsonyaml)
+  * [`-i`, `--include` *types*](#-i---include-types)
   * [`-r`, `--recursive`](#-r---recursive)
+  * [`-x`, `--exclude` *types*](#-x---exclude-types)
+* [Developer command line flags](#developer-command-line-flags)
+  * [`--cpu-profile` *filename*](#--cpu-profile-filename)
+  * [`--gops`](#--gops)
 * [Configuration file](#configuration-file)
   * [Variables](#variables)
   * [Examples](#examples)
@@ -38,76 +40,84 @@ Manage your dotfiles securely across multiple machines.
   * [Scripts](#scripts)
 * [Special files and directories](#special-files-and-directories)
   * [`.chezmoi.<format>.tmpl`](#chezmoiformattmpl)
+  * [`.chezmoidata.<format>`](#chezmoidataformat)
   * [`.chezmoiignore`](#chezmoiignore)
   * [`.chezmoiremove`](#chezmoiremove)
   * [`.chezmoitemplates`](#chezmoitemplates)
   * [`.chezmoiversion`](#chezmoiversion)
 * [Commands](#commands)
-  * [`add` *targets*](#add-targets)
-  * [`apply` [*targets*]](#apply-targets)
+  * [`add` *target*...](#add-target)
+  * [`apply` [*target*...]](#apply-target)
   * [`archive`](#archive)
-  * [`cat` *targets*](#cat-targets)
+  * [`cat` *target*...](#cat-target)
   * [`cd`](#cd)
-  * [`chattr` *attributes* *targets*](#chattr-attributes-targets)
+  * [`chattr` *attributes* *target*...](#chattr-attributes-target)
   * [`completion` *shell*](#completion-shell)
   * [`data`](#data)
-  * [`diff` [*targets*]](#diff-targets)
+  * [`diff` [*target*...]](#diff-target)
   * [`docs` [*regexp*]](#docs-regexp)
   * [`doctor`](#doctor)
-  * [`dump` [*targets*]](#dump-targets)
-  * [`edit` [*targets*]](#edit-targets)
+  * [`dump` [*target*...]](#dump-target)
+  * [`edit` [*target*...]](#edit-target)
   * [`edit-config`](#edit-config)
-  * [`execute-template` [*templates*]](#execute-template-templates)
+  * [`execute-template` [*template*...]](#execute-template-template)
   * [`forget` *targets*](#forget-targets)
-  * [`git` [*arguments*]](#git-arguments)
-  * [`help` *command*](#help-command)
+  * [`git` [*arg*...]](#git-arg)
+  * [`help` [*command*...]](#help-command)
   * [`init` [*repo*]](#init-repo)
   * [`import` *filename*](#import-filename)
   * [`manage` *targets*](#manage-targets)
   * [`managed`](#managed)
-  * [`merge` *targets*](#merge-targets)
+  * [`merge` *target*...](#merge-target)
   * [`purge`](#purge)
   * [`remove` *targets*](#remove-targets)
+  * [`re-add`](#re-add)
   * [`rm` *targets*](#rm-targets)
   * [`secret`](#secret)
-  * [`source-path` [*targets*]](#source-path-targets)
+  * [`source-path` [*target*...]](#source-path-target)
   * [`state`](#state)
   * [`status`](#status)
-  * [`unmanage` *targets*](#unmanage-targets)
+  * [`unmanage` *target*...](#unmanage-target)
   * [`unmanaged`](#unmanaged)
   * [`update`](#update)
-  * [`verify` [*targets*]](#verify-targets)
+  * [`upgrade`](#upgrade)
+  * [`verify` [*target*...]](#verify-target)
 * [Editor configuration](#editor-configuration)
 * [Umask configuration](#umask-configuration)
 * [Template execution](#template-execution)
 * [Template variables](#template-variables)
 * [Template functions](#template-functions)
-  * [`bitwarden` [*args*]](#bitwarden-args)
+  * [`bitwarden` [*arg*...]](#bitwarden-arg)
   * [`bitwardenAttachment` *filename* *itemid*](#bitwardenattachment-filename-itemid)
-  * [`bitwardenFields` [*args*]](#bitwardenfields-args)
+  * [`bitwardenFields` [*arg*...]](#bitwardenfields-arg)
   * [`gitHubKeys` *user*](#githubkeys-user)
   * [`gopass` *gopass-name*](#gopass-gopass-name)
+  * [`gopassRaw` *gopass-name*](#gopassraw-gopass-name)
   * [`include` *filename*](#include-filename)
   * [`ioreg`](#ioreg)
-  * [`joinPath` *elements*](#joinpath-elements)
+  * [`joinPath` *element*...](#joinpath-element)
   * [`keepassxc` *entry*](#keepassxc-entry)
   * [`keepassxcAttribute` *entry* *attribute*](#keepassxcattribute-entry-attribute)
   * [`keyring` *service* *user*](#keyring-service-user)
   * [`lastpass` *id*](#lastpass-id)
   * [`lastpassRaw` *id*](#lastpassraw-id)
   * [`lookPath` *file*](#lookpath-file)
-  * [`onepassword` *uuid* [*vault-uuid*]](#onepassword-uuid-vault-uuid)
-  * [`onepasswordDocument` *uuid* [*vault-uuid*]](#onepassworddocument-uuid-vault-uuid)
-  * [`onepasswordDetailsFields` *uuid* [*vault-uuid*]](#onepassworddetailsfields-uuid-vault-uuid)
-  * [`output` *name* [*args*]](#output-name-args)
+  * [`mozillaInstallHash` *path*](#mozillainstallhash-path)
+  * [`onepassword` *uuid* [*vault-uuid* [*account-name*]]](#onepassword-uuid-vault-uuid-account-name)
+  * [`onepasswordDocument` *uuid* [*vault-uuid* [*account-name*]]](#onepassworddocument-uuid-vault-uuid-account-name)
+  * [`onepasswordDetailsFields` *uuid* [*vault-uuid* [*account-name*]]](#onepassworddetailsfields-uuid-vault-uuid-account-name)
+  * [`output` *name* [*arg*...]](#output-name-arg)
   * [`pass` *pass-name*](#pass-pass-name)
+  * [`passRaw` *pass-name*](#passraw-pass-name)
   * [`promptBool` *prompt*](#promptbool-prompt)
   * [`promptInt` *prompt*](#promptint-prompt)
   * [`promptString` *prompt*](#promptstring-prompt)
-  * [`secret` [*args*]](#secret-args)
-  * [`secretJSON` [*args*]](#secretjson-args)
+  * [`secret` [*arg*...]](#secret-arg)
+  * [`secretJSON` [*arg*...]](#secretjson-arg)
   * [`stat` *name*](#stat-name)
+  * [`stdinIsATTY`](#stdinisatty)
   * [`vault` *key*](#vault-key)
+  * [`writeToStdout` *string*...](#writetostdout-string)
 
 ## Concepts
 
@@ -141,15 +151,11 @@ Command line flags override any values set in the configuration file.
 
 Colorize diffs, *value* can be `on`, `off`, `auto`, or any boolean-like value
 recognized by `parseBool`. The default is `auto` which will colorize diffs only
-if the the environment variable `NO_COLOR` is not set and stdout is a terminal.
+if the the environment variable `$NO_COLOR` is not set and stdout is a terminal.
 
 ### `-c`, `--config` *filename*
 
 Read the configuration from *filename*.
-
-### `--cpu-profile` *filename*
-
-Write a [CPU profile](https://blog.golang.org/pprof) to *filename*.
 
 ### `--debug`
 
@@ -164,13 +170,6 @@ Use *directory* as the destination directory.
 Set dry run mode. In dry run mode, the destination directory is never modified.
 This is most useful in combination with the `-v` (verbose) flag to print changes
 that would be made without making them.
-
-### `-x`, `--exclude` *types*
-
-Exclude target state entries of type *types*. *types* is a comma-separated list
-of target states (`all`, `dirs`, `files`, `remove`, `scripts`, `symlinks`, and
-`encrypted`). For example, `--exclude=scripts` will cause the command to not run
-scripts and `--exclude=encrypted` will exclude encrypted files.
 
 ### `--force`
 
@@ -227,21 +226,41 @@ timestamp.
 
 The following flags apply to multiple commands where they are relevant.
 
-### `--format` *format*
+### `-f`, `--format` `json`|`yaml`
 
-Set the output format. *format* can be `json` or `yaml`.
+Set the output format.
 
-### `--include` *types*
+### `-i`, `--include` *types*
 
 Only operate on target state entries of type *types*. *types* is a
 comma-separated list of target states (`all`, `dirs`, `files`, `remove`,
-`scripts`, `symlinks`, and `encrypted`) and can be excluded by preceeding them
+`scripts`, `symlinks`, and `encrypted`) and can be excluded by preceding them
 with a `no`. For example, `--include=dirs,files` will cause the command to apply
 to directories and files only.
 
 ### `-r`, `--recursive`
 
 Recurse into subdirectories, `true` by default.
+
+### `-x`, `--exclude` *types*
+
+Exclude target state entries of type *types*. *types* is a comma-separated list
+of target states (`all`, `dirs`, `files`, `remove`, `scripts`, `symlinks`, and
+`encrypted`). For example, `--exclude=scripts` will cause the command to not run
+scripts and `--exclude=encrypted` will exclude encrypted files.
+
+## Developer command line flags
+
+The following flags are global but only relevant for developers and debugging.
+
+### `--cpu-profile` *filename*
+
+Write a [Go CPU profile](https://blog.golang.org/pprof) to *filename*.
+
+### `--gops`
+
+Enable the [gops](https://github.com/google/gops) agent.
+
 
  ## Configuration file
 
@@ -258,54 +277,63 @@ of the config file is `chezmoi`, and the first config file found is used.
 
 The following configuration variables are available:
 
-| Section       | Variable          | Type     | Default value             | Description                                            |
-| ------------- | ----------------- | -------- | ------------------------- | ------------------------------------------------------ |
-| Top level     | `color`           | string   | `auto`                    | Colorize output                                        |
-|               | `data`            | any      | *none*                    | Template data                                          |
-|               | `destDir`         | string   | `~`                       | Destination directory                                  |
-|               | `encryption`      | string   | *none*                    | Encryption tool, either `age` or `gpg`                 |
-|               | `format`          | string   | `json`                    | Format for data output, either `json` or `yaml`        |
-|               | `remove`          | bool     | `false`                   | Remove targets                                         |
-|               | `sourceDir`       | string   | `~/.local/share/chezmoi`  | Source directory                                       |
-|               | `umask`           | int      | *from system*             | Umask                                                  |
-|               | `useBuiltinGit`   | string   | `auto`                    | Use builtin git if `git` command is not found in $PATH |
-| `age`         | `args`            | []string | *none*                    | Extra args to age CLI command                          |
-|               | `command`         | string   | `age`                     | age CLI command                                        |
-|               | `identity`        | string   | *none*                    | age identity file                                      |
-|               | `identities`      | []string | *none*                    | age identity files                                     |
-|               | `recipient`       | string   | *none*                    | age recipient                                          |
-|               | `recipients`      | []string | *none*                    | age recipients                                         |
-|               | `recipientsFile`  | []string | *none*                    | age recipients file                                    |
-|               | `recipientsFiles` | []string | *none*                    | age receipients files                                  |
-|               | `suffix`          | string   | `.age`                    | Suffix appended to age-encrypted files                 |
-| `bitwarden`   | `command`         | string   | `bw`                      | Bitwarden CLI command                                  |
-| `cd`          | `args`            | []string | *none*                    | Extra args to shell in `cd` command                    |
-|               | `command`         | string   | *none*                    | Shell to run in `cd` command                           |
-| `diff`        | `pager`           | string   | `$PAGER` / `less`         | Pager                                                  |
-| `edit`        | `args`            | []string | *none*                    | Extra args to edit command                             |
-|               | `command`         | string   | `$EDITOR` / `$VISUAL`     | Edit command                                           |
-| `secret`      | `command`         | string   | *none*                    | Generic secret command                                 |
-| `git`         | `autoAdd `        | bool     | `false`                   | Add changes to the source state after any change       |
-|               | `autoCommit`      | bool     | `false`                   | Commit changes to the source state after any change    |
-|               | `autoPush`        | bool     | `false`                   | Push changes to the source state after any change      |
-|               | `command`         | string   | `git`                     | Source version control system                          |
-| `gopass`      | `command`         | string   | `gopass`                  | gopass CLI command                                     |
-| `gpg`         | `args`            | []string | *none*                    | Extra args to GPG CLI command                          |
-|               | `command`         | string   | `gpg`                     | GPG CLI command                                        |
-|               | `recipient`       | string   | *none*                    | GPG recipient                                          |
-|               | `suffix`          | string   | `.asc`                    | Suffix appended to GPG-encrypted files                 |
-|               | `symmetric`       | bool     | `false`                   | Use symmetric GPG encryption                           |
-| `keepassxc`   | `args`            | []string | *none*                    | Extra args to KeePassXC CLI command                    |
-|               | `command`         | string   | `keepassxc-cli`           | KeePassXC CLI command                                  |
-|               | `database`        | string   | *none*                    | KeePassXC database                                     |
-| `lastpass`    | `command`         | string   | `lpass`                   | Lastpass CLI command                                   |
-| `merge`       | `args`            | []string | *none*                    | Extra args to 3-way merge command                      |
-|               | `command`         | string   | `vimdiff`                 | 3-way merge command                                    |
-| `onepassword` | `cache`           | bool     | `true`                    | Enable optional caching provided by `op`               |
-|               | `command`         | string   | `op`                      | 1Password CLI command                                  |
-| `pass`        | `command`         | string   | `pass`                    | Pass CLI command                                       |
-| `template`    | `options`         | []string | `["missingkey=error"]`    | Template options                                       |
-| `vault`       | `command`         | string   | `vault`                   | Vault CLI command                                      |
+| Section        | Variable              | Type     | Default value            | Description                                            |
+| -------------- | --------------------- | -------- | ------------------------ | ------------------------------------------------------ |
+| Top level      | `color`               | string   | `auto`                   | Colorize output                                        |
+|                | `data`                | any      | *none*                   | Template data                                          |
+|                | `destDir`             | string   | `~`                      | Destination directory                                  |
+|                | `encryption`          | string   | *none*                   | Encryption tool, either `age` or `gpg`                 |
+|                | `format`              | string   | `json`                   | Format for data output, either `json` or `yaml`        |
+|                | `remove`              | bool     | `false`                  | Remove targets                                         |
+|                | `sourceDir`           | string   | `~/.local/share/chezmoi` | Source directory                                       |
+|                | `pager`               | string   | `$PAGER`                 | Default pager                                          |
+|                | `umask`               | int      | *from system*            | Umask                                                  |
+|                | `useBuiltinGit`       | string   | `auto`                   | Use builtin git if `git` command is not found in $PATH |
+| `add`          | `templateSymlinks`    | bool     | `false`                  | Template symlinks to source and home dirs              |
+| `age`          | `args`                | []string | *none*                   | Extra args to age CLI command                          |
+|                | `command`             | string   | `age`                    | age CLI command                                        |
+|                | `identity`            | string   | *none*                   | age identity file                                      |
+|                | `identities`          | []string | *none*                   | age identity files                                     |
+|                | `passphrase`          | bool     | `false`                  | Use age passphrase instead of identity                 |
+|                | `recipient`           | string   | *none*                   | age recipient                                          |
+|                | `recipients`          | []string | *none*                   | age recipients                                         |
+|                | `recipientsFile`      | []string | *none*                   | age recipients file                                    |
+|                | `recipientsFiles`     | []string | *none*                   | age recipients files                                   |
+|                | `suffix`              | string   | `.age`                   | Suffix appended to age-encrypted files                 |
+|                | `symmetric`           | bool     | `false`                  | Use age symmetric encryption                           |
+| `bitwarden`    | `command`             | string   | `bw`                     | Bitwarden CLI command                                  |
+| `cd`           | `args`                | []string | *none*                   | Extra args to shell in `cd` command                    |
+|                | `command`             | string   | *none*                   | Shell to run in `cd` command                           |
+| `diff`         | `exclude`             | []string | *none*                   | Entry types to exclude from diff                       |
+|                | `pager`               | string   | *none*                   | Diff-specific pager                                    |
+| `docs`         | `maxWidth`            | int      | 80                       | Maximum width of output                                |
+|                | `pager`               | string   | *none*                   | Docs-specific pager                                    |
+| `edit`         | `args`                | []string | *none*                   | Extra args to edit command                             |
+|                | `command`             | string   | `$EDITOR` / `$VISUAL`    | Edit command                                           |
+| `secret`       | `command`             | string   | *none*                   | Generic secret command                                 |
+| `git`          | `autoAdd `            | bool     | `false`                  | Add changes to the source state after any change       |
+|                | `autoCommit`          | bool     | `false`                  | Commit changes to the source state after any change    |
+|                | `autoPush`            | bool     | `false`                  | Push changes to the source state after any change      |
+|                | `command`             | string   | `git`                    | Source version control system                          |
+| `gopass`       | `command`             | string   | `gopass`                 | gopass CLI command                                     |
+| `gpg`          | `args`                | []string | *none*                   | Extra args to GPG CLI command                          |
+|                | `command`             | string   | `gpg`                    | GPG CLI command                                        |
+|                | `recipient`           | string   | *none*                   | GPG recipient                                          |
+|                | `suffix`              | string   | `.asc`                   | Suffix appended to GPG-encrypted files                 |
+|                | `symmetric`           | bool     | `false`                  | Use symmetric GPG encryption                           |
+| `interpreters` | *extension*`.args`    | []string | *none*                   | See section on "Scripts on Windows"                    |
+|                | *extension*`.command` | string   | *special*                | See section on "Scripts on Windows"                    |
+| `keepassxc`    | `args`                | []string | *none*                   | Extra args to KeePassXC CLI command                    |
+|                | `command`             | string   | `keepassxc-cli`          | KeePassXC CLI command                                  |
+|                | `database`            | string   | *none*                   | KeePassXC database                                     |
+| `lastpass`     | `command`             | string   | `lpass`                  | Lastpass CLI command                                   |
+| `merge`        | `args`                | []string | *none*                   | Extra args to 3-way merge command                      |
+|                | `command`             | string   | `vimdiff`                | 3-way merge command                                    |
+| `onepassword`  | `cache`               | bool     | `true`                   | Enable optional caching provided by `op`               |
+|                | `command`             | string   | `op`                     | 1Password CLI command                                  |
+| `pass`         | `command`             | string   | `pass`                   | Pass CLI command                                       |
+| `template`     | `options`             | []string | `["missingkey=error"]`   | Template options                                       |
+| `vault`        | `command`             | string   | `vault`                  | Vault CLI command                                      |
 
 ### Examples
 
@@ -341,50 +369,60 @@ git:
 chezmoi stores the source state of files, symbolic links, and directories in
 regular files and directories in the source directory (`~/.local/share/chezmoi`
 by default). This location can be overridden with the `-S` flag or by giving a
-value for `sourceDir` in `~/.config/chezmoi/chezmoi.toml`.  Some state is
-encoded in the source names. chezmoi ignores all files and directories in the
-source directory that begin with a `.`. The following prefixes and suffixes are
-special, and are collectively referred to as "attributes":
+value for `sourceDir` in `~/.config/chezmoi/chezmoi.toml`. Directory targets are
+represented as directories in the source state. All other target types are
+represented as files in the source state. Some state is encoded in the source
+names.
+
+The following prefixes and suffixes are special, and are collectively referred
+to as "attributes":
 
 | Prefix       | Effect                                                                         |
 | ------------ | ------------------------------------------------------------------------------ |
 | `after_`     | Run script after updating the destination.                                     |
-| `before_`    | Run script before updating the desintation.                                    |
+| `before_`    | Run script before updating the destination.                                    |
 | `create_`    | Ensure that the file exists, and create it with contents if it does not.       |
 | `dot_`       | Rename to use a leading dot, e.g. `dot_foo` becomes `.foo`.                    |
 | `empty_`     | Ensure the file exists, even if is empty. By default, empty files are removed. |
 | `encrypted_` | Encrypt the file in the source state.                                          |
 | `exact_`     | Remove anything not managed by chezmoi.                                        |
 | `executable_`| Add executable permissions to the target file.                                 |
+| `literal_`   | Stop parsing prefix attributes.                                                |
 | `modify_`    | Treat the contents as a script that modifies an existing file.                 |
 | `once_`      | Run script once.                                                               |
 | `private_`   | Remove all group and world permissions from the target file or directory.      |
 | `run_`       | Treat the contents as a script to run.                                         |
 | `symlink_`   | Create a symlink instead of a regular file.                                    |
 
-| Suffix  | Effect                                               |
-| ------- | ---------------------------------------------------- |
-| `.tmpl` | Treat the contents of the source file as a template. |
+| Suffix     | Effect                                               |
+| ---------- | ---------------------------------------------------- |
+| `.literal` | Stop parsing suffix attributes.                      |
+| `.tmpl`    | Treat the contents of the source file as a template. |
 
-The order of prefixes is important, the order is `run_`, `create_`, `modify_`,
-`before_`, `after_`, `exact_`, `private_`, `empty_`, `executable_`, `symlink_`,
-`once_`, `dot_`.
+Different target types allow different prefixes and suffixes. The order of
+prefixes is important.
 
-Different target types allow different prefixes and suffixes:
+| Target type   | Source type | Allowed prefixes in order                                             | Allowed suffixes |
+| ------------- | ----------- | --------------------------------------------------------------------- | ---------------- |
+| Directory     | Directory   | `exact_`, `private_`, `dot_`                                          | *none*           |
+| Regular file  | File        | `encrypted_`, `private_`, `executable_`, `dot_`                       | `.tmpl`          |
+| Create file   | File        | `create_`, `encrypted_`, `private_`, `executable_`, `dot_`            | `.tmpl`          |
+| Modify file   | File        | `modify_`, `encrypted_`, `private_`, `executable_`, `dot_`            | `.tmpl`          |
+| Script        | File        | `run_`, `once_`, `before_` or `after_`                                | `.tmpl`          |
+| Symbolic link | File        | `symlink_`, `dot_`,                                                   | `.tmpl`          |
 
-| Target type   | Allowed prefixes                                                      | Allowed suffixes |
-| ------------- | --------------------------------------------------------------------- | ---------------- |
-| Directory     | `exact_`, `private_`, `dot_`                                          | *none*           |
-| Regular file  | `encrypted_`, `private_`, `executable_`, `dot_`                       | `.tmpl`          |
-| Create file   | `create_`, `encrypted_`, `private_`, `executable_`, `dot_`            | `.tmpl`          |
-| Modify file   | `modify_`, `encrypted_`, `private_`, `executable_`, `dot_`            | `.tmpl`          |
-| Script        | `run_`, `once_`, `before_` or `after_`                                | `.tmpl`          |
-| Symbolic link | `symlink_`, `dot_`,                                                   | `.tmpl`          |
+The `literal_` prefix and `.literal` suffix can appear anywhere and stop
+attribute parsing. This permits filenames that would otherwise conflict with
+chezmoi's attributes to be represented.
 
 In addition, if the source file is encrypted, the suffix `.age` (when age
 encryption is used) or `.asc` (when gpg encryption is used) is stripped. These
 suffixes can be overridden with the `age.suffix` and `gpg.suffix` configuration
 variables.
+
+chezmoi ignores all files and directories in the source directory that begin
+with a `.` with the exception of files and directories that begin with
+`.chezmoi`.
 
 ## Target types
 
@@ -400,7 +438,9 @@ Files are represented by regular files in the source state. The `encrypted_`
 attribute determines whether the file in the source state is encrypted. The
 `executable_` attribute will set the executable bits when the file is written to
 the target state, and the `private_` attribute will clear all group and world
-permissions. Files with the `.tmpl` suffix will be interpreted as templates.
+permissions. Files with the `.tmpl` suffix will be interpreted as templates. If
+the target contents are empty then the file will be removed, unless it has an
+`empty_` prefix.
 
 #### Create file
 
@@ -421,7 +461,7 @@ new contents are read from the scripts standard output.
 Directories are represented by regular directories in the source state. The
 `exact_` attribute causes chezmoi to remove any entries in the target state that
 are not explicitly specified in the source state, and the `private_` attribute
-causes chezmoi to clear all group and world permssions.
+causes chezmoi to clear all group and world permissions.
 
 ### Symbolic links
 
@@ -429,7 +469,8 @@ Symbolic links are represented by regular files in the source state with the
 prefix `symlink_`. The contents of the file will have a trailing newline
 stripped, and the result be interpreted as the target of the symbolic link.
 Symbolic links with the `.tmpl` suffix in the source state are interpreted as
-templates.
+templates. If the target of the symbolic link is empty or consists only of
+whitespace, then the target is removed.
 
 ### Scripts
 
@@ -445,6 +486,50 @@ all files, directories, and symlinks have been updated. Scripts without an
 `before_` or `after_` attribute are executed in ASCII order of their target
 names with respect to files, directories, and symlinks.
 
+Scripts will normally run with their working directory set to their equivalent
+location in the destination directory. For example, a script in
+`~/.local/share/chezmoi/dir/run_script` will be run with a working directory of
+`~/dir`. If the equivalent location in the destination directory either does not
+exist or is not a directory, then chezmoi will walk up the script's directory
+hierarchy and run the script in the first directory that exists and is a
+directory.
+
+#### Scripts on Windows
+
+<!-- FIXME: some of the following needs to be moved to the how-to -->
+
+The execution of scripts on Windows depends on the script's file extension.
+Windows will natively execute scripts with a `.bat`, `.cmd`, `.com`, and `.exe`
+extensions. Other extensions require an interpreter, which must be in your
+`%PATH%`.
+
+The default script interpreters are:
+
+| Extension | Command      | Arguments |
+| --------- | ------------ | --------- |
+| `.pl`     | `perl`       | *none*    |
+| `.py`     | `python`     | *none*    |
+| `.ps1`    | `powershell` | `-NoLogo` |
+| `.rb`     | `ruby`       | *none*    |
+
+Script interpreters can be added or overridden with the
+`interpreters.`*extension* section in the configuration file. Note that the
+leading `.` is dropped from *extension*.
+
+For example to change the Python interpreter to `C:\Python39\python.exe` and add
+a Tcl/Tk interpreter, include the following in `~/.config/chezmoi/chezmoi.toml`:
+
+```toml
+[interpreters.py]
+    command = 'C:\Python39\python.exe'
+[interpreters.tcl]
+    command = "tclsh"
+```
+
+If the script in the source state is a template (with a `.tmpl` extension), then
+chezmoi will strip the `.tmpl` extension and use the next remaining extension to
+determine the interpreter to use.
+
 ## Special files and directories
 
 All files and directories in the source state whose name begins with `.` are
@@ -458,15 +543,55 @@ config file formats.
 
 #### `.chezmoi.<format>.tmpl` examples
 
-    {{ $email := promptString "email" -}}
-    data:
-        email: "{{ $email }}"
+```
+{{ $email := promptString "email" -}}
+data:
+    email: {{ $email | quote }}
+```
+
+### `.chezmoidata.<format>`
+
+If a file called `.chezmoidata.<format>` exists in the source state, it is interpreted
+as a datasource available in most [templates](TEMPLATING.md#template-data).
+
+#### `.chezmoidata.<format>` examples
+
+If `.chezmoidata.toml` contains the following (and no variable is overwritten in later stages):
+
+```toml
+editor = "nvim"
+[directions]
+	up = "k"
+	down = "j"
+	right = "l"
+	left = "h"
+```
+
+Then the following template:
+
+```
+EDITOR={{ .editor }}
+MOVE_UP={{ .directions.up }}
+MOVE_DOWN={{ .directions.down }}
+MOVE_RIGHT={{ .directions.right }}
+MOVE_LEFT={{ .directions.left }}
+```
+
+Will result in:
+
+```
+EDITOR=nvim
+MOVE_UP=k
+MOVE_DOWN=j
+MOVE_RIGHT=l
+MOVE_LEFT=h
+```
 
 ### `.chezmoiignore`
 
 If a file called `.chezmoiignore` exists in the source state then it is
 interpreted as a set of patterns to ignore. Patterns are matched using
-[`doublestar.PathMatch`](https://pkg.go.dev/github.com/bmatcuk/doublestar?tab=doc#PathMatch)
+[`doublestar.Match`](https://pkg.go.dev/github.com/bmatcuk/doublestar/v4#Match)
 and match against the target path, not the source path.
 
 Patterns can be excluded by prefixing them with a `!` character. All excludes
@@ -482,24 +607,26 @@ ignored on different machines.
 
 #### `.chezmoiignore` examples
 
-    README.md
+```
+README.md
 
-    *.txt   # ignore *.txt in the target directory
-    */*.txt # ignore *.txt in subdirectories of the target directory
-    backups/** # ignore backups folder in chezmoi directory and all its contents
-            # but not in subdirectories of subdirectories;
-            # so a/b/c.txt would *not* be ignored
-    backups/** # ignore all contents of backups folder in chezmoi directory
-               # but not backups folder itself
+*.txt   # ignore *.txt in the target directory
+*/*.txt # ignore *.txt in subdirectories of the target directory
+backups/** # ignore backups folder in chezmoi directory and all its contents
+        # but not in subdirectories of subdirectories;
+        # so a/b/c.txt would *not* be ignored
+backups/** # ignore all contents of backups folder in chezmoi directory
+           # but not backups folder itself
 
-    {{- if ne .email "john.smith@company.com" }}
-    # Ignore .company-directory unless configured with a company email
-    .company-directory # note that the pattern is not dot_company-directory
-    {{- end }}
+{{- if ne .email "firstname.lastname@company.com" }}
+# Ignore .company-directory unless configured with a company email
+.company-directory # note that the pattern is not dot_company-directory
+{{- end }}
 
-    {{- if ne .email "john@home.org }}
-    .personal-file
-    {{- end }}
+{{- if ne .email "me@home.org }}
+.personal-file
+{{- end }}
+```
 
 ### `.chezmoiremove`
 
@@ -511,17 +638,26 @@ template.
 
 If a directory called `.chezmoitemplates` exists, then all files in this
 directory are parsed as templates are available as templates with a name equal
-to the relative path of the file.
+to the relative path to the `.chezmoitemplates` directory.
+
+The [`template` action](https://pkg.go.dev/text/template#hdr-Actions) can be
+used to include these templates in another template. The value of `.` must be
+set explicitly if needed, otherwise the template will be executed with `nil`
+data.
 
 #### `.chezmoitemplates` examples
 
 Given:
 
-    .chezmoitemplates/foo
-    {{ if true }}bar{{ end }}
+`.chezmoitemplates/foo`:
+```
+{{ if true }}bar{{ end }}
+```
 
-    dot_config.tmpl
-    {{ template "foo" }}
+`dot_config.tmpl`:
+```
+{{ template "foo" . }}
+```
 
 The target state of `.config` will be `bar`.
 
@@ -534,15 +670,17 @@ the current version is too old.
 
 #### `.chezmoiversion` examples
 
-    1.5.0
+```
+1.5.0
+```
 
 ## Commands
 
-### `add` *targets*
+### `add` *target*...
 
-Add *targets* to the source state. If any target is already in the source state,
+Add *target*s to the source state. If any target is already in the source state,
 then its source state is replaced with its current state in the destination
-directory. The `add` command accepts additional flags:
+directory.
 
 #### `--autotemplate`
 
@@ -583,17 +721,25 @@ Recursively add all files, directories, and symlinks.
 
 Set the `template` attribute on added files and symlinks.
 
+#### `--template-symlinks`
+
+When adding symlink to an absolute path in the source directory or destination
+directory, create a symlink template with `.chezmoi.sourceDir` or
+`.chezmoi.homeDir`. This is useful for creating portable absolute symlinks.
+
 #### `add` examples
 
-    chezmoi add ~/.bashrc
-    chezmoi add ~/.gitconfig --template
-    chezmoi add ~/.vim --recursive
-    chezmoi add ~/.oh-my-zsh --exact --recursive
+```console
+$ chezmoi add ~/.bashrc
+$ chezmoi add ~/.gitconfig --template
+$ chezmoi add ~/.vim --recursive
+$ chezmoi add ~/.oh-my-zsh --exact --recursive
+```
 
-### `apply` [*targets*]
+### `apply` [*target*...]
 
-Ensure that *targets* are in the target state, updating them if necessary. If no
-targets are specified, the state of all targets are ensured. If a target has
+Ensure that *target*... are in the target state, updating them if necessary. If
+no targets are specified, the state of all targets are ensured. If a target has
 been modified since chezmoi last wrote it then the user will be prompted if they
 want to overwrite the file.
 
@@ -608,22 +754,20 @@ applying changes after editing.
 
 #### `apply` examples
 
-    chezmoi apply
-    chezmoi apply --dry-run --verbose
-    chezmoi apply ~/.bashrc
-
-In `~/.vimrc`:
-
-    autocmd BufWritePost ~/.local/share/chezmoi/* ! chezmoi apply --source-path %
+```console
+$ chezmoi apply
+$ chezmoi apply --dry-run --verbose
+$ chezmoi apply ~/.bashrc
+```
 
 ### `archive`
 
-Generate a tar archive of the target state. This can be piped into `tar` to
-inspect the target state.
+Generate an archive of the target state. This can be piped into `tar` to inspect
+the target state.
 
-#### `--format` *format*
+#### `-f`, `--format` `tar`|`zip`
 
-Write the archive in *format*. *format* can be either `tar` (the default) or `zip`.
+Write the archive in *format*.
 
 #### `-i`, `--include` *types*
 
@@ -635,19 +779,24 @@ Compress the output with gzip.
 
 #### `archive` examples
 
-    chezmoi archive | tar tvf -
-    chezmoi archive --output=dotfiles.tar
-    chezmoi archive --format=zip --output=dotfiles.zip
+```console
+$ chezmoi archive | tar tvf -
+$ chezmoi archive --output=dotfiles.tar
+$ chezmoi archive --format=zip --output=dotfiles.zip
+```
 
-### `cat` *targets*
+### `cat` *target*...
 
-Write the target state of *targets*  to stdout. *targets* must be files or
-symlinks. For files, the target file contents are written. For symlinks, the
-target target is written.
+Write the target contents of *target*s to stdout. *targets* must be files,
+scripts, or symlinks. For files, the target file contents are written. For
+scripts, the script's contents are written. For symlinks, the target target is
+written.
 
 #### `cat` examples
 
-    chezmoi cat ~/.bashrc
+```console
+$ chezmoi cat ~/.bashrc
+```
 
 ### `cd`
 
@@ -658,11 +807,13 @@ will finally fall back to an OS-specific default.
 
 #### `cd` examples
 
-    chezmoi cd
+```console
+$ chezmoi cd
+```
 
-### `chattr` *attributes* *targets*
+### `chattr` *attributes* *target*...
 
-Change the attributes of *targets*. *attributes* specifies which attributes to
+Change the attributes of *target*s. *attributes* specifies which attributes to
 modify. Add attributes by specifying them or their abbreviations directly,
 optionally prefixed with a plus sign (`+`). Remove attributes by prefixing them
 or their attributes with the string `no` or a minus sign (`-`). The available
@@ -670,10 +821,13 @@ attributes and their abbreviations are:
 
 | Attribute    | Abbreviation |
 | ------------ | ------------ |
+| `after`      | `a`          |
+| `before`     | `b`          |
 | `empty`      | `e`          |
 | `encrypted`  | *none*       |
 | `exact`      | *none*       |
 | `executable` | `x`          |
+| `once`       | `o`
 | `private`    | `p`          |
 | `template`   | `t`          |
 
@@ -682,9 +836,11 @@ comma (`,`).
 
 #### `chattr` examples
 
-    chezmoi chattr template ~/.bashrc
-    chezmoi chattr noempty ~/.profile
-    chezmoi chattr private,template ~/.netrc
+```console
+$ chezmoi chattr template ~/.bashrc
+$ chezmoi chattr noempty ~/.profile
+$ chezmoi chattr private,template ~/.netrc
+```
 
 ### `completion` *shell*
 
@@ -693,41 +849,61 @@ Generate shell completion code for the specified shell (`bash`, `fish`,
 
 #### `completion` examples
 
-    chezmoi completion bash
-    chezmoi completion fish --output=~/.config/fish/completions/chezmoi.fish
+```console
+$ chezmoi completion bash
+$ chezmoi completion fish --output=~/.config/fish/completions/chezmoi.fish
+```
 
 ### `data`
 
 Write the computed template data to stdout.
 
+#### `-f`, `--format` `json`|`yaml`
+
+Set the output format.
+
 #### `data` examples
 
-    chezmoi data
-    chezmoi data --format=yaml
+```console
+$ chezmoi data
+$ chezmoi data --format=yaml
+```
 
-### `diff` [*targets*]
+### `diff` [*target*...]
 
 Print the difference between the target state and the destination state for
-*targets*. If no targets are specified, print the differences for all targets.
+*target*s. If no targets are specified, print the differences for all targets.
 
 If a `diff.pager` command is set in the configuration file then the output will
 be piped into it.
 
+#### `--pager` *pager*
+
+Pager to use for output.
+
 #### `diff` examples
 
-    chezmoi diff
-    chezmoi diff ~/.bashrc
+```console
+$ chezmoi diff
+$ chezmoi diff ~/.bashrc
+```
 
 ### `docs` [*regexp*]
 
 Print the documentation page matching the regular expression *regexp*. Matching
 is case insensitive. If no pattern is given, print `REFERENCE.md`.
 
+#### `--pager` *pager*
+
+Pager to use for output.
+
 #### `docs` examples
 
-    chezmoi docs
-    chezmoi docs faq
-    chezmoi docs howto
+```console
+$ chezmoi docs
+$ chezmoi docs faq
+$ chezmoi docs howto
+```
 
 ### `doctor`
 
@@ -735,12 +911,18 @@ Check for potential problems.
 
 #### `doctor` examples
 
-    chezmoi doctor
+```console
+$ chezmoi doctor
+```
 
-### `dump` [*targets*]
+### `dump` [*target*...]
 
-Dump the target state. If no targets are specified, then the entire target
-state.
+Dump the target state of *target*s. If no targets are specified, then the entire
+target state.
+
+#### `-f`, `--format` `json`|`yaml`
+
+Set the output format.
 
 #### `-i`, `--include` *types*
 
@@ -748,14 +930,23 @@ Only include entries of type *types*.
 
 #### `dump` examples
 
-    chezmoi dump ~/.bashrc
-    chezmoi dump --format=yaml
+```console
+$ chezmoi dump ~/.bashrc
+$ chezmoi dump --format=yaml
+```
 
-### `edit` [*targets*]
+### `edit` [*target*...]
 
-Edit the source state of *targets*, which must be files or symlinks. If no
-targets are given the the source directory itself is opened with `$EDITOR`. The
-`edit` command accepts additional arguments:
+Edit the source state of *target*s, which must be files or symlinks. If no
+targets are given the the source directory itself is opened.
+
+The editor used is the first non-empty string of the `edit.command`
+configuration variable, the `$VISUAL` environment variable, the `$EDITOR`
+environment variable. If none are set then chezmoi falls back to `notepad.exe`
+on Windows systems and `vi` on non-Windows systems.
+
+When the `edit.command` configuration variable is used, extra arguments can be
+passed to the editor with the `editor.args` configuration variable.
 
 #### `-a`, `--apply`
 
@@ -763,9 +954,11 @@ Apply target immediately after editing. Ignored if there are no targets.
 
 #### `edit` examples
 
-    chezmoi edit ~/.bashrc
-    chezmoi edit ~/.bashrc --apply
-    chezmoi edit
+```console
+$ chezmoi edit ~/.bashrc
+$ chezmoi edit ~/.bashrc --apply
+$ chezmoi edit
+```
 
 ### `edit-config`
 
@@ -773,11 +966,13 @@ Edit the configuration file.
 
 #### `edit-config` examples
 
-    chezmoi edit-config
+```console
+$ chezmoi edit-config
+```
 
-### `execute-template` [*templates*]
+### `execute-template` [*template*...]
 
-Execute *templates*. This is useful for testing templates or for calling chezmoi
+Execute *template*s. This is useful for testing templates or for calling chezmoi
 from other scripts. *templates* are interpreted as literal templates, with no
 whitespace added to the output between arguments. If no templates are specified,
 the template is read from stdin.
@@ -807,12 +1002,18 @@ Simulate the `promptString` function with a function that returns values from
 `promptString` is called with a *prompt* that does not match any of *pairs*,
 then it returns *prompt* unchanged.
 
+#### `--stdinisatty` *bool*
+
+Simulate the `stdinIsATTY` function by returning *bool*.
+
 #### `execute-template` examples
 
-    chezmoi execute-template '{{ .chezmoi.sourceDir }}'
-    chezmoi execute-template '{{ .chezmoi.os }}' / '{{ .chezmoi.arch }}'
-    echo '{{ .chezmoi | toJson }}' | chezmoi execute-template
-    chezmoi execute-template --init --promptString email=john@home.org < ~/.local/share/chezmoi/.chezmoi.toml.tmpl
+```console
+$ chezmoi execute-template '{{ .chezmoi.sourceDir }}'
+$ chezmoi execute-template '{{ .chezmoi.os }}' / '{{ .chezmoi.arch }}'
+$ echo '{{ .chezmoi | toJson }}' | chezmoi execute-template
+$ chezmoi execute-template --init --promptString email=me@home.org < ~/.local/share/chezmoi/.chezmoi.toml.tmpl
+```
 
 ### `forget` *targets*
 
@@ -820,36 +1021,42 @@ Remove *targets* from the source state, i.e. stop managing them.
 
 #### `forget` examples
 
-    chezmoi forget ~/.bashrc
+```console
+$ chezmoi forget ~/.bashrc
+```
 
-### `git` [*arguments*]
+### `git` [*arg*...]
 
-Run `git` *arguments* in the source directory. Note that flags in *arguments*
-must occur after `--` to prevent chezmoi from interpreting them.
+Run `git` *arg*s in the source directory. Note that flags in *arguments* must
+occur after `--` to prevent chezmoi from interpreting them.
 
 #### `git` examples
 
-    chezmoi git add .
-    chezmoi git add dot_gitconfig
-    chezmoi git -- commit -m "Add .gitconfig"
+```console
+$ chezmoi git add .
+$ chezmoi git add dot_gitconfig
+$ chezmoi git -- commit -m "Add .gitconfig"
+```
 
-### `help` *command*
+### `help` [*command*...]
 
-Print the help associated with *command*.
+Print the help associated with *command*, or general help if no command is
+given.
 
 ### `init` [*repo*]
 
-Setup the source directory, generate the config file, and optionally update
-the destination directory to match the target state. *repo* is expanded to a
-full git repo URL using the following rules:
+Setup the source directory, generate the config file, and optionally update the
+destination directory to match the target state. *repo* is expanded to a full
+git repo URL, using HTTPS by default, or SSH if the `--ssh` option is specified,
+according to the following patterns:
 
-| Pattern            | Repo                                   |
-| ------------------ | -------------------------------------- |
-| `user`             | `https://github.com/user/dotfiles.git` |
-| `user/repo`        | `https://github.com/user/repo.git`     |
-| `site/user/repo`   | `https://site/user/repo.git`           |
-| `~sr.ht/user`      | `https://git.sr.ht/~user/dotfiles`     |
-| `~sr.ht/user/repo` | `https://git.sr.ht/~user/repo`         |
+| Pattern            | HTTPS Repo                             | SSH repo                           |
+| ------------------ | -------------------------------------- | ---------------------------------- |
+| `user`             | `https://github.com/user/dotfiles.git` | `git@github.com:user/dotfiles.git` |
+| `user/repo`        | `https://github.com/user/repo.git`     | `git@github.com:user/repo.git`     |
+| `site/user/repo`   | `https://site/user/repo.git`           | `git@site:user/repo.git`           |
+| `~sr.ht/user`      | `https://git.sr.ht/~user/dotfiles`     | `git@git.sr.ht:~user/dotfiles.git` |
+| `~sr.ht/user/repo` | `https://git.sr.ht/~user/repo`         | `git@git.sr.ht:~/user/repo.git`    |
 
 First, if the source directory is not already contain a repository, then if
 *repo* is given it is checked out into the source directory, otherwise a new
@@ -871,14 +1078,28 @@ own binary.
 
 Run `chezmoi apply` after checking out the repo and creating the config file.
 
+#### `--branch` *branch*
+
+Check out *branch* instead of the default branch.
+
+#### `--config-path` *path*
+
+Write the generated config file to *path* instead of the default location.
+
+#### `--data` *bool*
+
+Include existing template data when creating the config file. This defaults to
+`true`. Set this to `false` to simulate creating the config file with no
+existing template data.
+
 #### `--depth` *depth*
 
 Clone the repo with depth *depth*.
 
 #### `--one-shot`
 
-`--one-shot` is the equivalent of `--apply`, `--depth=1`, `--purge`,
-`--purge-binary`. It attempts to install your dotfiles with chezmoi and then
+`--one-shot` is the equivalent of `--apply`, `--depth=1`, `--force`, `--purge`,
+and `--purge-binary`. It attempts to install your dotfiles with chezmoi and then
 remove all traces of chezmoi from the system. This is useful for setting up
 temporary environments (e.g. Docker containers).
 
@@ -890,13 +1111,19 @@ Remove the source and config directories after applying.
 
 Attempt to remove the chezmoi binary after applying.
 
+#### `--ssh`
+
+Guess an SSH repo URL instead of an HTTPS repo.
+
 #### `init` examples
 
-    chezmoi init user
-    chezmoi init user --apply
-    chezmoi init user --apply --purge
-    chezmoi init user/dots
-    chezmoi init gitlab.com/user
+```console
+$ chezmoi init user
+$ chezmoi init user --apply
+$ chezmoi init user --apply --purge
+$ chezmoi init user/dots
+$ chezmoi init gitlab.com/user
+```
 
 ### `import` *filename*
 
@@ -925,8 +1152,11 @@ Strip *n* leading components from paths.
 
 #### `import` examples
 
-    curl -s -L -o oh-my-zsh-master.tar.gz https://github.com/robbyrussell/oh-my-zsh/archive/master.tar.gz
-    chezmoi import --strip-components 1 --destination ~/.oh-my-zsh oh-my-zsh-master.tar.gz
+```console
+$ curl -s -L -o ${TMPDIR}/oh-my-zsh-master.tar.gz https://github.com/robbyrussell/oh-my-zsh/archive/master.tar.gz
+$ mkdir -p $(chezmoi source-path)/dot_oh-my-zsh
+$ chezmoi import --strip-components 1 --destination ~/.oh-my-zsh ${TMPDIR}/oh-my-zsh-master.tar.gz
+```
 
 ### `manage` *targets*
 
@@ -942,24 +1172,29 @@ Only include entries of type *types*.
 
 #### `managed` examples
 
-    chezmoi managed
-    chezmoi managed --include=files
-    chezmoi managed --include=files,symlinks
-    chezmoi managed -i d
-    chezmoi managed -i d,f
+```console
+$ chezmoi managed
+$ chezmoi managed --include=files
+$ chezmoi managed --include=files,symlinks
+$ chezmoi managed -i d
+$ chezmoi managed -i d,f
+```
 
-### `merge` *targets*
+### `merge` *target*...
 
 Perform a three-way merge between the destination state, the target state, and
-the source state. The merge tool is defined by the `merge.command` configuration
-variable, and defaults to `vimdiff`. If multiple targets are specified the merge
-tool is invoked for each target. If the target state cannot be computed (for
-example if source is a template containing errors or an encrypted file that
-cannot be decrypted) a two-way merge is performed instead.
+the source state for each *target*. The merge tool is defined by the
+`merge.command` configuration variable, and defaults to `vimdiff`. If multiple
+targets are specified the merge tool is invoked for each target. If the target
+state cannot be computed (for example if source is a template containing errors
+or an encrypted file that cannot be decrypted) a two-way merge is performed
+instead.
 
 #### `merge` examples
 
-    chezmoi merge ~/.bashrc
+```console
+$ chezmoi merge ~/.bashrc
+```
 
 ### `purge`
 
@@ -972,8 +1207,10 @@ Remove without prompting.
 
 #### `purge` examples
 
-    chezmoi purge
-    chezmoi purge --force
+```console
+$ chezmoi purge
+$ chezmoi purge --force
+```
 
 ### `remove` *targets*
 
@@ -982,6 +1219,17 @@ Remove *targets* from both the source state and the destination directory.
 #### `-f`, `--force`
 
 Remove without prompting.
+
+### `re-add`
+
+Re-add all modified files in the target state. chezmoi will not overwrite
+templates, and all entries that are not files are ignored.
+
+#### `re-add` examples
+
+```console
+$ chezmoi re-add
+```
 
 ### `rm` *targets*
 
@@ -997,22 +1245,28 @@ separate them with `--` to prevent chezmoi from interpreting them.
 
 To get a full list of available commands run:
 
-    chezmoi secret help
+```console
+$ chezmoi secret help
+```
 
 #### `secret` examples
 
-    chezmoi secret keyring set --service=service --user=user --value=password
-    chezmoi secret keyring get --service=service --user=user
+```console
+$ chezmoi secret keyring set --service=service --user=user --value=password
+$ chezmoi secret keyring get --service=service --user=user
+```
 
-### `source-path` [*targets*]
+### `source-path` [*target*...]
 
 Print the path to each target's source state. If no targets are specified then
 print the source directory.
 
 #### `source-path` examples
 
-    chezmoi source-path
-    chezmoi source-path ~/.bashrc
+```console
+$ chezmoi source-path
+$ chezmoi source-path ~/.bashrc
+```
 
 ### `state`
 
@@ -1020,8 +1274,14 @@ Manipulate the persistent state.
 
 #### `state` examples
 
-    chezmoi state dump
-    chemzoi state reset
+```console
+$ chezmoi state data
+$ chezmoi state delete --bucket=bucket --key=key
+$ chezmoi state dump
+$ chezmoi state get --bucket=bucket --key=key
+$ chezmoi state set --bucket=bucket --key=key --value=value
+$ chezmoi state reset
+```
 
 ### `status`
 
@@ -1038,9 +1298,11 @@ Only include entries of type *types*.
 
 #### `status` examples
 
-    chezmoi status
+```console
+$ chezmoi status
+```
 
-### `unmanage` *targets*
+### `unmanage` *target*...
 
 `unmanage` is an alias for `forget` for symmetry with `manage`.
 
@@ -1050,11 +1312,13 @@ List all unmanaged files in the destination directory.
 
 #### `unmanaged` examples
 
-    chezmoi unmanaged
+```console
+$ chezmoi unmanaged
+```
 
 ### `update`
 
-Pull changes from the source VCS and apply any changes.
+Pull changes from the source repo and apply any changes.
 
 #### `-i`, `--include` *types*
 
@@ -1062,11 +1326,27 @@ Only update entries of type *types*.
 
 #### `update` examples
 
-    chezmoi update
+```console
+$ chezmoi update
+```
 
-### `verify` [*targets*]
+### `upgrade`
 
-Verify that all *targets* match their target state. chezmoi exits with code 0
+Upgrade chezmoi by downloading and installing the latest released version. This
+will call the GitHub API to determine if there is a new version of chezmoi
+available, and if so, download and attempt to install it in the same way as
+chezmoi was previously installed.
+
+If the any of the `$CHEZMOI_GITHUB_ACCESS_TOKEN`, `$GITHUB_ACCESS_TOKEN`, or
+`$GITHUB_TOKEN` environment variables are set, then the first value found will
+be used to authenticate requests to the GitHub API, otherwise unauthenticated
+requests are used which are subject to stricter [rate
+limiting](https://developer.github.com/v3/#rate-limiting). Unauthenticated
+requests should be sufficient for most cases.
+
+### `verify` [*target*...]
+
+Verify that all *target*s match their target state. chezmoi exits with code 0
 (success) if all targets match their target state, or 1 (failure) otherwise. If
 no targets are specified then all targets are checked.
 
@@ -1076,13 +1356,15 @@ Only include entries of type *types*.
 
 #### `verify` examples
 
-    chezmoi verify
-    chezmoi verify ~/.bashrc
+```console
+$ chezmoi verify
+$ chezmoi verify ~/.bashrc
+```
 
 ## Editor configuration
 
 The `edit` and `edit-config` commands use the editor specified by the `VISUAL`
-environment variable, the `EDITOR` environment variable, or `vi`, whichever is
+environment variable, the `$EDITOR` environment variable, or `vi`, whichever is
 specified first.
 
 ## Umask configuration
@@ -1095,7 +1377,9 @@ and `0o077` respectively.
 For machine-specific control of umask, set the `umask` configuration variable in
 chezmoi's configuration file, for example:
 
-    umask = 0o22
+```toml
+umask = 0o22
+```
 
 ## Template execution
 
@@ -1118,8 +1402,10 @@ chezmoi executes templates using `text/template`'s `missingkey=error` option,
 which means that misspelled or missing keys will raise an error. This can be
 overridden by setting a list of options in the configuration file, for example:
 
-    [template]
-      options = ["missingkey=zero"]
+```toml
+[template]
+    options = ["missingkey=zero"]
+```
 
 For a full list of options, see
 [`Template.Option`](https://pkg.go.dev/text/template?tab=doc#Template.Option).
@@ -1139,6 +1425,7 @@ chezmoi provides the following automatically-populated variables:
 | `.chezmoi.os`           | Operating system, e.g. `darwin`, `linux`, etc. as returned by [runtime.GOOS](https://pkg.go.dev/runtime?tab=doc#pkg-constants). |
 | `.chezmoi.osRelease`    | The information from `/etc/os-release`, Linux only, run `chezmoi data` to see its output.                                       |
 | `.chezmoi.sourceDir`    | The source directory.                                                                                                           |
+| `.chezmoi.sourceFile`   | The path of the template relative to the source directory.                                                                      |
 | `.chezmoi.username`     | The username of the user running chezmoi.                                                                                       |
 | `.chezmoi.version`      | The version of chezmoi.                                                                                                         |
 
@@ -1152,19 +1439,21 @@ All standard [`text/template`](https://pkg.go.dev/text/template) and [text
 template functions from `sprig`](http://masterminds.github.io/sprig/) are
 included. chezmoi provides some additional functions.
 
-### `bitwarden` [*args*]
+### `bitwarden` [*arg*...]
 
 `bitwarden` returns structured data retrieved from
 [Bitwarden](https://bitwarden.com) using the [Bitwarden
-CLI](https://github.com/bitwarden/cli) (`bw`). *args* are passed to `bw get`
+CLI](https://github.com/bitwarden/cli) (`bw`). *arg*s are passed to `bw get`
 unchanged and the output from `bw get` is parsed as JSON. The output from `bw
 get` is cached so calling `bitwarden` multiple times with the same arguments
 will only invoke `bw` once.
 
 #### `bitwarden` examples
 
-    username = {{ (bitwarden "item" "<itemid>").login.username }}
-    password = {{ (bitwarden "item" "<itemid>").login.password }}
+```
+username = {{ (bitwarden "item" "<itemid>").login.username }}
+password = {{ (bitwarden "item" "<itemid>").login.password }}
+```
 
 ### `bitwardenAttachment` *filename* *itemid*
 
@@ -1178,47 +1467,49 @@ only invoke `bw` once.
 
 #### `bitwardenAttachment` examples
 
-    {{- (bitwardenAttachment "<filename>" "<itemid>") -}}
+```
+{{- (bitwardenAttachment "<filename>" "<itemid>") -}}
+```
 
-### `bitwardenFields` [*args*]
+### `bitwardenFields` [*arg*...]
 
 `bitwardenFields` returns structured data retrieved from
 [Bitwarden](https://bitwarden.com) using the [Bitwarden
-CLI](https://github.com/bitwarden/cli) (`bw`). *args* are passed to `bw get`
+CLI](https://github.com/bitwarden/cli) (`bw`). *arg*s are passed to `bw get`
 unchanged, the output from `bw get` is parsed as JSON, and elements of `fields`
 are returned as a map indexed by each field's `name`. For example, given the
 output from `bw get`:
 
 ```json
 {
-  "object": "item",
-  "id": "bf22e4b4-ae4a-4d1c-8c98-ac620004b628",
-  "organizationId": null,
-  "folderId": null,
-  "type": 1,
-  "name": "example.com",
-  "notes": null,
-  "favorite": false,
-  "fields": [
-    {
-      "name": "text",
-      "value": "text-value",
-      "type": 0
+    "object": "item",
+    "id": "bf22e4b4-ae4a-4d1c-8c98-ac620004b628",
+    "organizationId": null,
+    "folderId": null,
+    "type": 1,
+    "name": "example.com",
+    "notes": null,
+    "favorite": false,
+    "fields": [
+        {
+            "name": "text",
+            "value": "text-value",
+            "type": 0
+        },
+        {
+            "name": "hidden",
+            "value": "hidden-value",
+            "type": 1
+        }
+    ],
+    "login": {
+        "username": "username-value",
+        "password": "password-value",
+        "totp": null,
+        "passwordRevisionDate": null
     },
-    {
-      "name": "hidden",
-      "value": "hidden-value",
-      "type": 1
-    }
-  ],
-  "login": {
-    "username": "username-value",
-    "password": "password-value",
-    "totp": null,
-    "passwordRevisionDate": null
-  },
-  "collectionIds": [],
-  "revisionDate": "2020-10-28T00:21:02.690Z"
+    "collectionIds": [],
+    "revisionDate": "2020-10-28T00:21:02.690Z"
 }
 ```
 
@@ -1226,16 +1517,16 @@ the return value will be the map
 
 ```json
 {
-  "hidden": {
-    "name": "hidden",
-    "type": 1,
-    "value": "hidden-value"
-  },
-  "token": {
-    "name": "token",
-    "type": 0,
-    "value": "token-value"
-  }
+    "hidden": {
+        "name": "hidden",
+        "type": 1,
+        "value": "hidden-value"
+    },
+    "token": {
+        "name": "token",
+        "type": 0,
+        "value": "token-value"
+    }
 }
 ```
 
@@ -1244,7 +1535,9 @@ the same arguments will only invoke `bw get` once.
 
 #### `bitwardenFields` examples
 
-    {{ (bitwardenFields "item" "<itemid>").token.value }}
+```
+{{ (bitwardenFields "item" "<itemid>").token.value }}
+```
 
 ### `gitHubKeys` *user*
 
@@ -1262,8 +1555,8 @@ By default, an anonymous GitHub API request will be made, which is subject to
 [GitHub's rate
 limits](https://docs.github.com/en/rest/overview/resources-in-the-rest-api#rate-limiting)
 (currently 60 requests per hour per source IP address). If any of the
-environment variables `CHEZMOI_GITHUB_ACCESS_TOKEN`, `GITHUB_ACCESS_TOKEN`, or
-`GITHUB_TOKEN` are found, then the first one found will be used to authenticate
+environment variables `$CHEZMOI_GITHUB_ACCESS_TOKEN`, `$GITHUB_ACCESS_TOKEN`, or
+`$GITHUB_TOKEN` are found, then the first one found will be used to authenticate
 the GitHub API request, with a higher rate limit (currently 5,000 requests per
 hour per user).
 
@@ -1275,26 +1568,39 @@ token](https://docs.github.com/en/github/authenticating-to-github/creating-a-per
 
 #### `gitHubKeys` examples
 
-    {{ range (gitHubKeys "user") }}
-    {{- .Key }}
-    {{ end }}
+```
+{{ range (gitHubKeys "user") }}
+{{- .Key }}
+{{ end }}
+```
 
 ### `gopass` *gopass-name*
 
 `gopass` returns passwords stored in [gopass](https://www.gopass.pw/) using the
-gopass CLI (`gopass`). *gopass-name* is passed to `gopass show <gopass-name>`
-and first line of the output of `gopass` is returned with the trailing newline
-stripped. The output from `gopass` is cached so calling `gopass` multiple times
-with the same *gopass-name* will only invoke `gopass` once.
+gopass CLI (`gopass`). *gopass-name* is passed to `gopass show --password
+<gopass-name>` and the first line of the output of `gopass` is returned with the
+trailing newline stripped. The output from `gopass` is cached so calling
+`gopass` multiple times with the same *gopass-name* will only invoke `gopass`
+once.
 
 #### `gopass` examples
 
-    {{ gopass "<pass-name>" }}
+```
+{{ gopass "<pass-name>" }}
+```
+
+### `gopassRaw` *gopass-name*
+
+`gopass` returns passwords stored in [gopass](https://www.gopass.pw/) using the
+gopass CLI (`gopass`). *gopass-name* is passed to `gopass show <gopass-name>`
+and  output of `gopass` is returned. The output from `gopassRaw` is cached so
+calling `gopassRaw` multiple times with the same *gopass-name* will only invoke
+`gopass` once.
 
 ### `include` *filename*
 
-`include` returns the literal contents of the file named `*filename*`, relative
-to the source directory.
+`include` returns the literal contents of the file named `*filename*`. Relative
+paths are interpreted relative to the source directory.
 
 ### `ioreg`
 
@@ -1308,11 +1614,13 @@ only execute the `ioreg -a -l` command once.
 
 #### `ioreg` examples
 
-    {{ if (eq .chezmoi.os "darwin") }}
-    {{ $serialNumber := index ioreg "IORegistryEntryChildren" 0 "IOPlatformSerialNumber" }}
-    {{ end }}
+```
+{{ if (eq .chezmoi.os "darwin") }}
+{{ $serialNumber := index ioreg "IORegistryEntryChildren" 0 "IOPlatformSerialNumber" }}
+{{ end }}
+```
 
-### `joinPath` *elements*
+### `joinPath` *element*...
 
 `joinPath` joins any number of path elements into a single path, separating them
 with the OS-specific path separator. Empty elements are ignored. The result is
@@ -1322,7 +1630,9 @@ first non-empty element is a UNC path.
 
 #### `joinPath` examples
 
-    {{ joinPath .chezmoi.homeDir ".zshrc" }}
+```
+{{ joinPath .chezmoi.homeDir ".zshrc" }}
+```
 
 ### `keepassxc` *entry*
 
@@ -1338,8 +1648,10 @@ key-value pairs and cached so calling `keepassxc` multiple times with the same
 
 #### `keepassxc` examples
 
-    username = {{ (keepassxc "example.com").UserName }}
-    password = {{ (keepassxc "example.com").Password }}
+```
+username = {{ (keepassxc "example.com").UserName }}
+password = {{ (keepassxc "example.com").Password }}
+```
 
 ### `keepassxcAttribute` *entry* *attribute*
 
@@ -1350,7 +1662,9 @@ prompting, password storage, and result caching.
 
 #### `keepassxcAttribute` examples
 
-    {{ keepassxcAttribute "SSH Key" "private-key" }}
+```
+{{ keepassxcAttribute "SSH Key" "private-key" }}
+```
 
 ### `keyring` *service* *user*
 
@@ -1365,9 +1679,11 @@ user's keyring.
 
 #### `keyring` examples
 
-    [github]
-      user = "{{ .github.user }}"
-      token = "{{ keyring "github" .github.user }}"
+```
+[github]
+    user = {{ .github.user | quote }}
+    token = {{ keyring "github" .github.user | quote }}
+```
 
 ### `lastpass` *id*
 
@@ -1382,8 +1698,10 @@ from `lastpass` is cached so calling `lastpass` multiple times with the same
 
 #### `lastpass` examples
 
-    githubPassword = "{{ (index (lastpass "GitHub") 0).password }}"
-    {{ (index (lastpass "SSH") 0).note.privateKey }}
+```
+githubPassword = {{ (index (lastpass "GitHub") 0).password | quote }}
+{{ (index (lastpass "SSH") 0).note.privateKey }}
+```
 
 ### `lastpassRaw` *id*
 
@@ -1394,7 +1712,9 @@ further parsing is done on the `note` field.
 
 #### `lastpassRaw` examples
 
-    {{ (index (lastpassRaw "SSH Private Key") 0).note }}
+```
+{{ (index (lastpassRaw "SSH Private Key") 0).note }}
+```
 
 ### `lookPath` *file*
 
@@ -1410,43 +1730,62 @@ caution when using it in your templates.
 
 #### `lookPath` examples
 
-    {{ if lookPath "diff-so-fancy" }}
-    # diff-so-fancy is in $PATH
-    {{ end }}
+```
+{{ if lookPath "diff-so-fancy" }}
+# diff-so-fancy is in $PATH
+{{ end }}
+```
 
-### `onepassword` *uuid* [*vault-uuid*]
+### `mozillaInstallHash` *path*
+
+`mozillaInstallHash` returns the Mozilla install hash for *path*. This is a
+convenience function to assist the management of Firefox profiles.
+
+### `onepassword` *uuid* [*vault-uuid* [*account-name*]]
 
 `onepassword` returns structured data from [1Password](https://1password.com/)
 using the [1Password
 CLI](https://support.1password.com/command-line-getting-started/) (`op`). *uuid*
 is passed to `op get item <uuid>` and the output from `op` is parsed as JSON.
 The output from `op` is cached so calling `onepassword` multiple times with the
-same *uuid* will only invoke `op` once.  If the optional *vault-uuid* is supplied,
-it will be passed along to the `op get` call, which can significantly improve
-performance.
+same *uuid* will only invoke `op` once.  If the optional *vault-uuid* is
+supplied, it will be passed along to the `op get` call, which can significantly
+improve performance. If the optional *account-name* is supplied, it will be
+passed along to the `op get` call, which will help it look in the right account,
+in case you have multiple accounts (eg. personal and work accounts).
 
 #### `onepassword` examples
 
-    {{ (onepassword "<uuid>").details.password }}
-    {{ (onepassword "<uuid>" "<vault-uuid>").details.password }}
+```
+{{ (onepassword "<uuid>").details.password }}
+{{ (onepassword "<uuid>" "<vault-uuid>").details.password }}
+{{ (onepassword "<uuid>" "<vault-uuid>" "<account-name>").details.password }}
+{{ (onepassword "<uuid>" "" "<account-name>").details.password }}
+```
 
-### `onepasswordDocument` *uuid* [*vault-uuid*]
+### `onepasswordDocument` *uuid* [*vault-uuid* [*account-name*]]
 
-`onepassword` returns a document from [1Password](https://1password.com/)
-using the [1Password
-CLI](https://support.1password.com/command-line-getting-started/) (`op`). *uuid*
-is passed to `op get document <uuid>` and the output from `op` is returned.
-The output from `op` is cached so calling `onepasswordDocument` multiple times with the
-same *uuid* will only invoke `op` once.  If the optional *vault-uuid* is supplied,
-it will be passed along to the `op get` call, which can significantly improve
-performance.
+`onepassword` returns a document from [1Password](https://1password.com/) using
+the [1Password CLI](https://support.1password.com/command-line-getting-started/)
+(`op`). *uuid* is passed to `op get document <uuid>` and the output from `op` is
+returned. The output from `op` is cached so calling `onepasswordDocument`
+multiple times with the same *uuid* will only invoke `op` once.  If the optional
+*vault-uuid* is supplied, it will be passed along to the `op get` call, which
+can significantly improve performance. If the optional *account-name* is
+supplied, it will be passed along to the `op get` call, which will help it look
+in the right account, in case you have multiple accounts (eg. personal and work
+accounts).
 
 #### `onepasswordDocument` examples
 
-    {{- onepasswordDocument "<uuid>" -}}
-    {{- onepasswordDocument "<uuid>" "<vault-uuid>" -}}
+```
+{{- onepasswordDocument "<uuid>" -}}
+{{- onepasswordDocument "<uuid>" "<vault-uuid>" -}}
+{{- onepasswordDocument "<uuid>" "<vault-uuid>" "<account-name>" -}}
+{{- onepasswordDocument "<uuid>" "" "<account-name>" -}}
+```
 
-### `onepasswordDetailsFields` *uuid* [*vault-uuid*]
+### `onepasswordDetailsFields` *uuid* [*vault-uuid* [*account-name*]]
 
 `onepasswordDetailsFields` returns structured data from
 [1Password](https://1password.com/) using the [1Password
@@ -1457,23 +1796,23 @@ elements of `details.fields` are returned as a map indexed by each field's
 
 ```json
 {
-  "uuid": "<uuid>",
-  "details": {
-    "fields": [
-      {
-        "designation": "username",
-        "name": "username",
-        "type": "T",
-        "value": "exampleuser"
-      },
-      {
-        "designation": "password",
-        "name": "password",
-        "type": "P",
-        "value": "examplepassword"
-      }
-    ],
-  }
+    "uuid": "<uuid>",
+    "details": {
+        "fields": [
+            {
+                "designation": "username",
+                "name": "username",
+                "type": "T",
+                "value": "exampleuser"
+            },
+            {
+                "designation": "password",
+                "name": "password",
+                "type": "P",
+                "value": "examplepassword"
+            }
+        ]
+    }
 }
 ```
 
@@ -1481,33 +1820,41 @@ the return value will be the map:
 
 ```json
 {
-  "username": {
-    "designation": "username",
-    "name": "username",
-    "type": "T",
-    "value": "exampleuser"
-  },
-  "password": {
-    "designation": "password",
-    "name": "password",
-    "type": "P",
-    "value": "examplepassword"
-  }
+    "username": {
+        "designation": "username",
+        "name": "username",
+        "type": "T",
+        "value": "exampleuser"
+    },
+    "password": {
+        "designation": "password",
+        "name": "password",
+        "type": "P",
+        "value": "examplepassword"
+    }
 }
 ```
 
-The output from `op` is cached so calling `onepassword` multiple times with the
-same *uuid* will only invoke `op` once.  If the optional *vault-uuid* is supplied,
-it will be passed along to the `op get` call, which can significantly improve
-performance.
+The output from `op` is cached so calling `onepasswordDetailsFields` multiple
+times with the same *uuid* will only invoke `op` once.  If the optional
+*vault-uuid* is supplied, it will be passed along to the `op get` call, which
+can significantly improve performance. If the optional *account-name* is
+supplied, it will be passed along to the `op get` call, which will help it look
+in the right account, in case you have multiple accounts (eg. personal and work
+accounts).
 
 #### `onepasswordDetailsFields` examples
 
-    {{ (onepasswordDetailsFields "<uuid>").password.value }}
+```
+{{ (onepasswordDetailsFields "<uuid>").password.value }}
+{{ (onepasswordDetailsFields "<uuid>" "<vault-uuid>").password.value }}
+{{ (onepasswordDetailsFields "<uuid>" "<vault-uuid>" "<account-name>").password.value }}
+{{ (onepasswordDetailsFields "<uuid>" "" "<account-name>").password.value }}
+```
 
-### `output` *name* [*args*]
+### `output` *name* [*arg*...]
 
-`output` returns the output of executing the command *name* with *args*. If
+`output` returns the output of executing the command *name* with *arg*s. If
 executing the command returns an error then template execution exits with an
 error. The execution occurs every time that the template is executed. It is the
 user's responsibility to ensure that executing the command is both idempotent
@@ -1515,19 +1862,30 @@ and fast.
 
 #### `output` examples
 
-    current-context: {{ output "kubectl" "config" "current-context" | trim }}
+```
+current-context: {{ output "kubectl" "config" "current-context" | trim }}
+```
 
 ### `pass` *pass-name*
 
 `pass` returns passwords stored in [pass](https://www.passwordstore.org/) using
-the pass CLI (`pass`). *pass-name* is passed to `pass show <pass-name>` and
+the pass CLI (`pass`). *pass-name* is passed to `pass show <pass-name>` and the
 first line of the output of `pass` is returned with the trailing newline
 stripped. The output from `pass` is cached so calling `pass` multiple times with
 the same *pass-name* will only invoke `pass` once.
 
 #### `pass` examples
 
-    {{ pass "<pass-name>" }}
+```
+{{ pass "<pass-name>" }}
+```
+
+### `passRaw` *pass-name*
+
+`passRaw` returns passwords stored in [pass](https://www.passwordstore.org/)
+using the pass CLI (`pass`). *pass-name* is passed to `pass show <pass-name>`
+and the output is returned. The output from `pass` is cached so calling
+`passRaw` multiple times with the same *pass-name* will only invoke `pass` once.
 
 ### `promptBool` *prompt*
 
@@ -1554,21 +1912,23 @@ generating the initial config file.
 
 #### `promptString` examples
 
-    {{ $email := promptString "email" -}}
-    [data]
-        email = "{{ $email }}"
+```
+{{ $email := promptString "email" -}}
+[data]
+    email = {{ $email | quote }}
+```
 
-### `secret` [*args*]
+### `secret` [*arg*...]
 
 `secret` returns the output of the generic secret command defined by the
-`secret.command` configuration variable with *args* with leading and trailing
+`secret.command` configuration variable with *arg*s with leading and trailing
 whitespace removed. The output is cached so multiple calls to `secret` with the
-same *args* will only invoke the generic secret command once.
+same *arg*s will only invoke the generic secret command once.
 
-### `secretJSON` [*args*]
+### `secretJSON` [*arg*...]
 
 `secretJSON` returns structured data from the generic secret command defined by
-the `secret.command` configuration variable with *args*. The output is parsed as
+the `secret.command` configuration variable with *arg*s. The output is parsed as
 JSON. The output is cached so multiple calls to `secret` with the same *args*
 will only invoke the generic secret command once.
 
@@ -1586,9 +1946,29 @@ templates.
 
 #### `stat` examples
 
-    {{ if stat (joinPath .chezmoi.homeDir ".pyenv") }}
-    # ~/.pyenv exists
-    {{ end }}
+```
+{{ if stat (joinPath .chezmoi.homeDir ".pyenv") }}
+# ~/.pyenv exists
+{{ end }}
+```
+
+### `stdinIsATTY`
+
+`stdinIsATTY` returns `true` if chezmoi's standard input is a TTY. It is only
+available when generating the initial config file. It is primarily useful for
+determining whether `prompt*` functions should be called or default values be
+used.
+
+#### `stdinIsATTY` examples
+
+```
+{{ $email := "" }}
+{{ if stdinIsATTY }}
+{{   $email = promptString "email" }}
+{{ else }}
+{{   $email = "user@example.com" }}
+{{ end }}
+```
 
 ### `vault` *key*
 
@@ -1600,4 +1980,17 @@ times with the same *key* will only invoke `vault` once.
 
 #### `vault` examples
 
-    {{ (vault "<key>").data.data.password }}
+```
+{{ (vault "<key>").data.data.password }}
+```
+
+### `writeToStdout` *string*...
+
+`writeToStdout` writes each *string* to stdout. It is only available when
+generating the initial config file.
+
+#### `writeToStdout` examples
+
+```
+{{- writeToStdout "Hello, world\n" -}}
+```

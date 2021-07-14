@@ -1,21 +1,28 @@
 package chezmoi
 
 import (
+	"errors"
+	"io/fs"
 	"os"
 	"os/exec"
 	"runtime"
 
-	"github.com/bmatcuk/doublestar/v3"
+	"github.com/bmatcuk/doublestar/v4"
 	"github.com/rs/zerolog/log"
-	vfs "github.com/twpayne/go-vfs/v2"
+	vfs "github.com/twpayne/go-vfs/v3"
 	"go.uber.org/multierr"
 
-	"github.com/twpayne/chezmoi/internal/chezmoilog"
+	"github.com/twpayne/chezmoi/v2/internal/chezmoilog"
 )
 
 // Glob implements System.Glob.
 func (s *RealSystem) Glob(pattern string) ([]string, error) {
-	return doublestar.GlobOS(doubleStarOS{FS: s.UnderlyingFS()}, pattern)
+	return doublestar.Glob(s.UnderlyingFS(), pattern)
+}
+
+// IdempotentCmdCombinedOutput implements System.IdempotentCmdCombinedOutput.
+func (s *RealSystem) IdempotentCmdCombinedOutput(cmd *exec.Cmd) ([]byte, error) {
+	return chezmoilog.LogCmdCombinedOutput(log.Logger, cmd)
 }
 
 // IdempotentCmdOutput implements System.IdempotentCmdOutput.
@@ -24,23 +31,18 @@ func (s *RealSystem) IdempotentCmdOutput(cmd *exec.Cmd) ([]byte, error) {
 }
 
 // Lstat implements System.Lstat.
-func (s *RealSystem) Lstat(filename AbsPath) (os.FileInfo, error) {
-	return s.fs.Lstat(string(filename))
+func (s *RealSystem) Lstat(filename AbsPath) (fs.FileInfo, error) {
+	return s.fileSystem.Lstat(string(filename))
 }
 
 // Mkdir implements System.Mkdir.
-func (s *RealSystem) Mkdir(name AbsPath, perm os.FileMode) error {
-	return s.fs.Mkdir(string(name), perm)
-}
-
-// PathSeparator implements doublestar.OS.PathSeparator.
-func (s *RealSystem) PathSeparator() rune {
-	return '/'
+func (s *RealSystem) Mkdir(name AbsPath, perm fs.FileMode) error {
+	return s.fileSystem.Mkdir(string(name), perm)
 }
 
 // RawPath implements System.RawPath.
 func (s *RealSystem) RawPath(absPath AbsPath) (AbsPath, error) {
-	rawAbsPath, err := s.fs.RawPath(string(absPath))
+	rawAbsPath, err := s.fileSystem.RawPath(string(absPath))
 	if err != nil {
 		return "", err
 	}
@@ -48,23 +50,23 @@ func (s *RealSystem) RawPath(absPath AbsPath) (AbsPath, error) {
 }
 
 // ReadDir implements System.ReadDir.
-func (s *RealSystem) ReadDir(name AbsPath) ([]os.DirEntry, error) {
-	return s.fs.ReadDir(string(name))
+func (s *RealSystem) ReadDir(name AbsPath) ([]fs.DirEntry, error) {
+	return s.fileSystem.ReadDir(string(name))
 }
 
 // ReadFile implements System.ReadFile.
 func (s *RealSystem) ReadFile(name AbsPath) ([]byte, error) {
-	return s.fs.ReadFile(string(name))
+	return s.fileSystem.ReadFile(string(name))
 }
 
 // RemoveAll implements System.RemoveAll.
 func (s *RealSystem) RemoveAll(name AbsPath) error {
-	return s.fs.RemoveAll(string(name))
+	return s.fileSystem.RemoveAll(string(name))
 }
 
 // Rename implements System.Rename.
 func (s *RealSystem) Rename(oldpath, newpath AbsPath) error {
-	return s.fs.Rename(string(oldpath), string(newpath))
+	return s.fileSystem.Rename(string(oldpath), string(newpath))
 }
 
 // RunCmd implements System.RunCmd.
@@ -73,7 +75,7 @@ func (s *RealSystem) RunCmd(cmd *exec.Cmd) error {
 }
 
 // RunScript implements System.RunScript.
-func (s *RealSystem) RunScript(scriptname RelPath, dir AbsPath, data []byte) (err error) {
+func (s *RealSystem) RunScript(scriptname RelPath, dir AbsPath, data []byte, interpreter *Interpreter) (err error) {
 	// Write the temporary script file. Put the randomness at the front of the
 	// filename to preserve any file extension for Windows scripts.
 	f, err := os.CreateTemp("", "*."+scriptname.Base())
@@ -97,23 +99,51 @@ func (s *RealSystem) RunScript(scriptname RelPath, dir AbsPath, data []byte) (er
 		return
 	}
 
-	// Run the temporary script file.
-	//nolint:gosec
-	cmd := exec.Command(f.Name())
-	cmd.Dir = string(dir)
+	cmd := interpreter.ExecCommand(f.Name())
+	cmd.Dir, err = s.getScriptWorkingDir(dir)
+	if err != nil {
+		return err
+	}
 	cmd.Stdin = os.Stdin
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
-	err = s.RunCmd(cmd)
-	return
+
+	return s.RunCmd(cmd)
 }
 
 // Stat implements System.Stat.
-func (s *RealSystem) Stat(name AbsPath) (os.FileInfo, error) {
-	return s.fs.Stat(string(name))
+func (s *RealSystem) Stat(name AbsPath) (fs.FileInfo, error) {
+	return s.fileSystem.Stat(string(name))
 }
 
 // UnderlyingFS implements System.UnderlyingFS.
 func (s *RealSystem) UnderlyingFS() vfs.FS {
-	return s.fs
+	return s.fileSystem
+}
+
+// getScriptWorkingDir returns the script's working directory.
+//
+// If this is a before_ script then the requested working directory may not
+// actually exist yet, so search through the parent directory hierarchy till
+// we find a suitable working directory.
+func (s *RealSystem) getScriptWorkingDir(dir AbsPath) (string, error) {
+	// This should always terminate because dir will eventually become ".", i.e.
+	// the current directory.
+	for {
+		switch info, err := s.Stat(dir); {
+		case err == nil && info.IsDir():
+			// dir exists and is a directory. Use it.
+			dirRawAbsPath, err := s.RawPath(dir)
+			if err != nil {
+				return "", err
+			}
+			return string(dirRawAbsPath), nil
+		case err == nil || errors.Is(err, fs.ErrNotExist):
+			// Either dir does not exist, or it exists and is not a directory.
+			dir = dir.Dir()
+		default:
+			// Some other error occurred.
+			return "", err
+		}
+	}
 }

@@ -4,6 +4,19 @@
 
 Manage your dotfiles across multiple diverse machines, securely.
 
+With chezmoi, you can install chezmoi and your dotfiles on a new, empty machine
+with a single command:
+
+```console
+$ sh -c "$(curl -fsLS git.io/chezmoi)" -- init --apply <github-username>
+```
+
+Updating your dotfiles on any machine is a single command:
+
+```console
+$ chezmoi update
+```
+
 * [How do I start with chezmoi now?](#how-do-i-start-with-chezmoi-now)
 * [What does chezmoi do and why should I use it?](#what-does-chezmoi-do-and-why-should-i-use-it)
 * [What are chezmoi's key features?](#what-are-chezmois-key-features)
@@ -52,7 +65,7 @@ only requires adding a single binary to your machine (which you can do with
 
 chezmoi has strong support for security, allowing you to manage secrets (e.g.
 passwords, access tokens, and private keys) securely and seamlessly using a
-password manager and/or encypt whole files with your favorite encryption tool.
+password manager and/or encrypt whole files with your favorite encryption tool.
 
 If you do not personalize your configuration or only ever use a single operating
 system with a single account and none of your dotfiles contain secrets then you
@@ -72,15 +85,15 @@ FreeBSD, OpenBSD, and Termux.
 
 ### Personal and secure
 
-Nothing leaves your machine, unless you want it to. You can use the version
-control system of your choice to manage your configuration, and you can write
-the configuration file in the format of your choice. chezmoi can retrieve
-secrets from [1Password](https://1password.com/),
-[Bitwarden](https://bitwarden.com/), [gopass](https://www.gopass.pw/),
-[KeePassXC](https://keepassxc.org/), [LastPass](https://lastpass.com/),
-[pass](https://www.passwordstore.org/), [Vault](https://www.vaultproject.io/),
-Keychain, [Keyring](https://wiki.gnome.org/Projects/GnomeKeyring), or any
-command-line utility of your choice. You can encrypt individual files with
+Nothing leaves your machine, unless you want it to. Your configuration remains
+in a git repo under your control. You can write the configuration file in the
+format of your choice. chezmoi can retrieve secrets from
+[1Password](https://1password.com/), [Bitwarden](https://bitwarden.com/),
+[gopass](https://www.gopass.pw/), [KeePassXC](https://keepassxc.org/),
+[LastPass](https://lastpass.com/), [pass](https://www.passwordstore.org/),
+[Vault](https://www.vaultproject.io/), Keychain,
+[Keyring](https://wiki.gnome.org/Projects/GnomeKeyring), or any command-line
+utility of your choice. You can encrypt individual files with
 [GnuPG](https://www.gnupg.org) or [age](https://age-encryption.org). You can
 checkout your dotfiles repo on as many machines as you want without revealing
 any secrets to anyone.
@@ -130,17 +143,18 @@ Read what [people have said about chezmoi](docs/MEDIA.md).
 
 * [Install guide](docs/INSTALL.md) to get chezmoi installed on your machine with
   one or two commands.
-* [Changes guide](docs/CHANGES.md) for upgrading from a previous major version
-  of chezmoi.
 * [Quick start guide](docs/QUICKSTART.md) for your first steps.
 * [How-to guide](docs/HOWTO.md) for achieving specific tasks.
 * [Templating guide](docs/TEMPLATING.md) for working with templates.
 * [FAQ](docs/FAQ.md) for questions that aren't answered elsewhere.
-* [Changes](docs/CHANGES.md) for non-backwards compatible changes.
+* [Changes guide](docs/CHANGES.md) for upgrading from a previous major version
+  of chezmoi.
 * [Reference](docs/REFERENCE.md) for a complete description of chezmoi.
 * [Comparison guide](docs/COMPARISON.md) for a comparison with other dotfile managers.
-* [Contributing](docs/CONTRIBUTING.md) for people looking to contribute to or
-  package chezmoi.
+* [Related software](docs/RELATED.md) for third party software that works with
+  chezmoi.
+* [Contributing](docs/CONTRIBUTING.md) and [Architecture](docs/ARCHITECTURE.md)
+  for people looking to contribute to or package chezmoi.
 
 ## License
 

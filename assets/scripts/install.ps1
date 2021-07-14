@@ -124,12 +124,18 @@ function get_goarch {
     $arch = "$([Runtime.InteropServices.RuntimeInformation]::OSArchitecture)";
     $wmi_arch = $null;
 
+    if ((-not $arch) -and [Environment]::Is64BitOperatingSystem) {
+        $arch = "X64";
+    }
+
+    # [Environment]::Is64BitOperatingSystem is only available on .net 4 or
+    # newer, so if we still don't know, try another method
     if (-not $arch) {
         if (Get-Command "Get-WmiObject" -ErrorAction SilentlyContinue) {
             $wmi_arch = (Get-WmiObject -Class Win32_OperatingSystem | Select-Object *).OSArchitecture
-            if ($wmi_arch -eq "64-bit") {
+            if ($wmi_arch.StartsWith("64")) {
                 $arch = "X64";
-            } elseif ($wmi_arch -eq "32-bit") {
+            } elseif ($wmi_arch.StartsWith("32")) {
                 $arch = "X86";
             }
         }
@@ -241,6 +247,10 @@ function Install-Chezmoi {
         [string[]]$ExecArgs
     )
 
+    # some sub-functions (ie, get_goarch, likely others) require fetching of
+    # non-existent properites to not error
+    Set-StrictMode -off
+
     # $BinDir = Resolve-Path $BinDir
 
     $os = get_goos
@@ -291,7 +301,7 @@ function Install-Chezmoi {
     $binary = "chezmoi$($binsuffix)";
     $tmp_binary = (Join-Path $tempdir $binary);
 
-    Move-Item -Path $tmp_binary -Destination $BinDir
+    Move-Item -Force -Path $tmp_binary -Destination $BinDir
 
     log-info "Installed $($BinDir)/$($binary)"
 
@@ -311,4 +321,3 @@ try {
         Remove-Item -LiteralPath $tempdir -Recurse -Force
     }
 }
-

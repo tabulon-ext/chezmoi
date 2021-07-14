@@ -1,9 +1,9 @@
 package chezmoi
 
 import (
-	"os"
+	"io/fs"
 
-	vfs "github.com/twpayne/go-vfs/v2"
+	vfs "github.com/twpayne/go-vfs/v3"
 )
 
 // A dataType is a data type.
@@ -28,7 +28,7 @@ type DumpSystem struct {
 type dirData struct {
 	Type dataType    `json:"type" toml:"type" yaml:"type"`
 	Name AbsPath     `json:"name" toml:"name" yaml:"name"`
-	Perm os.FileMode `json:"perm" toml:"perm" yaml:"perm"`
+	Perm fs.FileMode `json:"perm" toml:"perm" yaml:"perm"`
 }
 
 // A fileData contains data about a file.
@@ -36,14 +36,15 @@ type fileData struct {
 	Type     dataType    `json:"type" toml:"type" yaml:"type"`
 	Name     AbsPath     `json:"name" toml:"name" yaml:"name"`
 	Contents string      `json:"contents" toml:"contents" yaml:"contents"`
-	Perm     os.FileMode `json:"perm" toml:"perm" yaml:"perm"`
+	Perm     fs.FileMode `json:"perm" toml:"perm" yaml:"perm"`
 }
 
 // A scriptData contains data about a script.
 type scriptData struct {
-	Type     dataType `json:"type" toml:"type" yaml:"type"`
-	Name     AbsPath  `json:"name" toml:"name" yaml:"name"`
-	Contents string   `json:"contents" toml:"contents" yaml:"contents"`
+	Type        dataType     `json:"type" toml:"type" yaml:"type"`
+	Name        AbsPath      `json:"name" toml:"name" yaml:"name"`
+	Contents    string       `json:"contents" toml:"contents" yaml:"contents"`
+	Interpreter *Interpreter `json:"interpreter,omitempty" toml:"interpreter,omitempty" yaml:"interpreter,omitempty"`
 }
 
 // A symlinkData contains data about a symlink.
@@ -66,9 +67,9 @@ func (s *DumpSystem) Data() interface{} {
 }
 
 // Mkdir implements System.Mkdir.
-func (s *DumpSystem) Mkdir(dirname AbsPath, perm os.FileMode) error {
+func (s *DumpSystem) Mkdir(dirname AbsPath, perm fs.FileMode) error {
 	if _, exists := s.data[dirname]; exists {
-		return os.ErrExist
+		return fs.ErrExist
 	}
 	s.data[dirname] = &dirData{
 		Type: dataTypeDir,
@@ -79,16 +80,20 @@ func (s *DumpSystem) Mkdir(dirname AbsPath, perm os.FileMode) error {
 }
 
 // RunScript implements System.RunScript.
-func (s *DumpSystem) RunScript(scriptname RelPath, dir AbsPath, data []byte) error {
+func (s *DumpSystem) RunScript(scriptname RelPath, dir AbsPath, data []byte, interpreter *Interpreter) error {
 	scriptnameAbsPath := AbsPath(scriptname)
 	if _, exists := s.data[scriptnameAbsPath]; exists {
-		return os.ErrExist
+		return fs.ErrExist
 	}
-	s.data[scriptnameAbsPath] = &scriptData{
+	scriptData := &scriptData{
 		Type:     dataTypeScript,
 		Name:     scriptnameAbsPath,
 		Contents: string(data),
 	}
+	if !interpreter.None() {
+		scriptData.Interpreter = interpreter
+	}
+	s.data[scriptnameAbsPath] = scriptData
 	return nil
 }
 
@@ -98,9 +103,9 @@ func (s *DumpSystem) UnderlyingFS() vfs.FS {
 }
 
 // WriteFile implements System.WriteFile.
-func (s *DumpSystem) WriteFile(filename AbsPath, data []byte, perm os.FileMode) error {
+func (s *DumpSystem) WriteFile(filename AbsPath, data []byte, perm fs.FileMode) error {
 	if _, exists := s.data[filename]; exists {
-		return os.ErrExist
+		return fs.ErrExist
 	}
 	s.data[filename] = &fileData{
 		Type:     dataTypeFile,
@@ -114,7 +119,7 @@ func (s *DumpSystem) WriteFile(filename AbsPath, data []byte, perm os.FileMode) 
 // WriteSymlink implements System.WriteSymlink.
 func (s *DumpSystem) WriteSymlink(oldname string, newname AbsPath) error {
 	if _, exists := s.data[newname]; exists {
-		return os.ErrExist
+		return fs.ErrExist
 	}
 	s.data[newname] = &symlinkData{
 		Type:     dataTypeSymlink,

@@ -2,43 +2,38 @@ package chezmoi
 
 import (
 	"fmt"
-	"os"
+	"io/fs"
 	"sort"
 	"testing"
 
 	"github.com/muesli/combinator"
 	"github.com/stretchr/testify/require"
-	vfs "github.com/twpayne/go-vfs/v2"
-	"github.com/twpayne/go-vfs/v2/vfst"
+	vfs "github.com/twpayne/go-vfs/v3"
+	"github.com/twpayne/go-vfs/v3/vfst"
 
-	"github.com/twpayne/chezmoi/internal/chezmoitest"
+	"github.com/twpayne/chezmoi/v2/internal/chezmoitest"
 )
 
-func TestTargetStateEntryApplyAndEqual(t *testing.T) {
+func TestTargetStateEntryApply(t *testing.T) {
 	targetStates := map[string]TargetStateEntry{
 		"dir": &TargetStateDir{
 			perm: 0o777 &^ chezmoitest.Umask,
 		},
 		"file": &TargetStateFile{
-			perm: 0o666 &^ chezmoitest.Umask,
-			lazyContents: &lazyContents{
-				contents: []byte("# contents of file"),
-			},
+			perm:         0o666 &^ chezmoitest.Umask,
+			lazyContents: newLazyContents([]byte("# contents of file")),
 		},
 		"file_empty": &TargetStateFile{
-			perm: 0o666 &^ chezmoitest.Umask,
+			perm:  0o666 &^ chezmoitest.Umask,
+			empty: true,
 		},
 		"file_executable": &TargetStateFile{
-			perm: 0o777 &^ chezmoitest.Umask,
-			lazyContents: &lazyContents{
-				contents: []byte("#!/bin/sh\n"),
-			},
+			perm:         0o777 &^ chezmoitest.Umask,
+			lazyContents: newLazyContents([]byte("#!/bin/sh\n")),
 		},
 		"remove": &TargetStateRemove{},
 		"symlink": &TargetStateSymlink{
-			lazyLinkname: &lazyLinkname{
-				linkname: "target",
-			},
+			lazyLinkname: newLazyLinkname("target"),
 		},
 	}
 
@@ -102,19 +97,20 @@ func TestTargetStateEntryApplyAndEqual(t *testing.T) {
 			targetState := targetStates[tc.TargetStateKey]
 			actualState := actualStates[tc.ActualDestDirStateKey]
 
-			chezmoitest.WithTestFS(t, actualState, func(fs vfs.FS) {
-				s := NewRealSystem(fs)
+			chezmoitest.WithTestFS(t, actualState, func(fileSystem vfs.FS) {
+				s := NewRealSystem(fileSystem)
 
-				// Read the initial destination state entry from fs.
+				// Read the initial destination state entry from fileSystem.
 				actualStateEntry, err := NewActualStateEntry(s, "/home/user/target", nil, nil)
 				require.NoError(t, err)
 
 				// Apply the target state entry.
-				require.NoError(t, targetState.Apply(s, nil, actualStateEntry, chezmoitest.Umask))
+				_, err = targetState.Apply(s, nil, actualStateEntry)
+				require.NoError(t, err)
 
 				// Verify that the actual state entry matches the desired
 				// state.
-				vfst.RunTests(t, fs, "", vfst.TestPath("/home/user/target", targetStateTest(t, targetState)...))
+				vfst.RunTests(t, fileSystem, "", vfst.TestPath("/home/user/target", targetStateTest(t, targetState)...))
 			})
 		})
 	}
@@ -151,7 +147,7 @@ func targetStateTest(t *testing.T, ts TargetStateEntry) []vfst.PathTest {
 		expectedLinkname, err := ts.Linkname()
 		require.NoError(t, err)
 		return []vfst.PathTest{
-			vfst.TestModeType(os.ModeSymlink),
+			vfst.TestModeType(fs.ModeSymlink),
 			vfst.TestSymlinkTarget(expectedLinkname),
 		}
 	default:

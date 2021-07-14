@@ -7,9 +7,9 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	vfs "github.com/twpayne/go-vfs/v2"
+	vfs "github.com/twpayne/go-vfs/v3"
 
-	"github.com/twpayne/chezmoi/internal/chezmoitest"
+	"github.com/twpayne/chezmoi/v2/internal/chezmoitest"
 )
 
 var _ System = &RealSystem{}
@@ -24,8 +24,8 @@ func TestRealSystemGlob(t *testing.T) {
 			"dir/foo":        "",
 			"dir/subdir/foo": "",
 		},
-	}, func(fs vfs.FS) {
-		s := NewRealSystem(fs)
+	}, func(fileSystem vfs.FS) {
+		s := NewRealSystem(fileSystem)
 		for _, tc := range []struct {
 			pattern         string
 			expectedMatches []string

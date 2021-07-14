@@ -1,14 +1,24 @@
-# chezmoi Templating Guide
+# chezmoi templating guide
 
 <!--- toc --->
 * [Introduction](#introduction)
+* [Template data](#template-data)
 * [Creating a template file](#creating-a-template-file)
+* [Editing a template file](#editing-a-template-file)
+* [Testing templates](#testing-templates)
+* [Template syntax](#template-syntax)
+  * [Removing whitespace](#removing-whitespace)
 * [Debugging templates](#debugging-templates)
 * [Simple logic](#simple-logic)
+  * [Boolean functions](#boolean-functions)
+  * [Integer functions](#integer-functions)
 * [More complicated logic](#more-complicated-logic)
+  * [Chaining operators](#chaining-operators)
 * [Helper functions](#helper-functions)
 * [Template variables](#template-variables)
-* [Using .chezmoitemplates for creating similar files](#using-chezmoitemplates-for-creating-similar-files)
+* [Using `.chezmoitemplates`](#using-chezmoitemplates)
+* [Using `.chezmoitemplates` for creating similar files](#using-chezmoitemplates-for-creating-similar-files)
+  * [Passing multiple arguments](#passing-multiple-arguments)
 
 ## Introduction
 
@@ -31,11 +41,16 @@ if either of the following is true:
 
 chezmoi provides a variety of template variables. For a full list, run
 
-    chezmoi data
+```console
+$ chezmoi data
+```
 
-These come from a variety of sources:
+These come from a variety of sources (later data overwrite earlier ones):
 
 * Variables populated by chezmoi are in `.chezmoi`, for example `.chezmoi.os`.
+* Variables created by you in the `.chezmoidata.<format>` configuration file.
+  The various supported formats (json, toml and yaml) are read in alphabetical
+  order.
 * Variables created by you in the `data` section of the configuration file.
 
 Furthermore, chezmoi provides a variety of functions to retrieve data at runtime
@@ -47,24 +62,32 @@ There are several ways to create a template:
 
 * When adding a file for the first time, pass the `--template` argument, for example:
 
-      chezmoi add --template ~/.zshrc
+```console
+$ chezmoi add --template ~/.zshrc
+```
 
 * When adding a file for the first time, you can pass the `--autotemplate`
   argument, which tells chezmoi to make the file as a template and automatically
   replace variables that chezmoi knows about, for example:
 
-      chezmoi add --autotemplate ~/.zshrc
+```console
+$ chezmoi add --autotemplate ~/.zshrc
+```
 
 * If a file is already managed by chezmoi, but is not a template, you can make
   it a template by running, for example:
 
-      chezmoi chattr +template ~/.zshrc
+```console
+$ chezmoi chattr +template ~/.zshrc
+```
 
 * You can create a template manually in the source directory by giving it a
   `.tmpl` extension, for example:
 
-      chezmoi cd
-      $EDITOR dot_zshrc.tmpl
+```console
+$ chezmoi cd
+$ $EDITOR dot_zshrc.tmpl
+```
 
 * Templates in `.chezmoitemplates` must be created manually, for example:
 
@@ -77,7 +100,9 @@ There are several ways to create a template:
 
 The easiest way to edit a template is to use `chezmoi edit`, for example:
 
-	chezmoi edit ~/.zshrc
+```console
+$ chezmoi edit ~/.zshrc
+```
 
 This will open the source file for `~/.zshrc` in `$EDITOR`. When you quit the
 editor, chezmoi will check the template syntax.
@@ -85,7 +110,9 @@ editor, chezmoi will check the template syntax.
 If you want the changes you make to be immediately applied after you quit the
 editor, use the `--apply` option, for example:
 
-	chezmoi edit --apply ~/.zshrc
+```console
+$ chezmoi edit --apply ~/.zshrc
+```
 
 ## Testing templates
 
@@ -93,13 +120,17 @@ Templates can be tested with the `chezmoi execute-template` command which treats
 each of its arguments as a template and executes it. This can be useful for
 testing small fragments of templates, for example:
 
-    chezmoi execute-template '{{ .chezmoi.hostname }}'
+```console
+$ chezmoi execute-template '{{ .chezmoi.hostname }}'
+```
 
 If there are no arguments, `chezmoi execute-template` will read the template
 from the standard input. This can be useful for testing whole files, for example:
 
-	chezmoi cd
-	chezmoi execute-template < dot_zshrc.tmpl
+```console
+$ chezmoi cd
+$ chezmoi execute-template < dot_zshrc.tmpl
+```
 
 ## Template syntax
 
@@ -109,18 +140,22 @@ is copied literally.
 
 Variables are written literally, for example:
 
-    {{ .chezmoi.hostname }}
+```
+{{ .chezmoi.hostname }}
+```
 
 Conditional expressions can be written using `if`, `else if`, `else`, and `end`,
 for example:
 
-	{{ if (eq .chezmoi.os "darwin") }}
-	# darwin
-	{{ else if (eq .chezmoi.os "linux" ) }}
-	# linux
-	{{ else }}
-	# other operating system
-	{{ end }}
+```
+{{ if (eq .chezmoi.os "darwin") }}
+# darwin
+{{ else if (eq .chezmoi.os "linux" ) }}
+# linux
+{{ else }}
+# other operating system
+{{ end }}
+```
 
 For a full description of the template syntax, see the [`text/template`
 documentation](https://pkg.go.dev/text/template).
@@ -135,11 +170,15 @@ A solution for this is to place a minus sign and a space next to the brackets.
 So `{{- ` for the left brackets and ` -}}` for the right brackets. Here's an
 example:
 
-	HOSTNAME= {{- .chezmoi.hostname }}
+```
+HOSTNAME={{- .chezmoi.hostname }}
+```
 
 This will result in
 
-	HOSTNAME=myhostname
+```
+HOSTNAME=myhostname
+```
 
 Notice that this will remove any number of tabs, spaces and even newlines and
 carriage returns.
@@ -155,26 +194,32 @@ interpret any data coming from stdin or at the end of the command. It will then
 interpret all templates and output the result to stdout. For example with the
 command:
 
-	chezmoi execute-template '{{ .chezmoi.os }}/{{ .chezmoi.arch }}'
+```console
+$ chezmoi execute-template '{{ .chezmoi.os }}/{{ .chezmoi.arch }}'
+```
 
 chezmoi will output the current OS and architecture to stdout.
 
 You can also feed the contents of a file to this command by typing:
 
-	cat foo.txt | chezmoi execute-template
+```console
+$ cat foo.txt | chezmoi execute-template
+```
 
 ## Simple logic
 
 A very useful feature of chezmoi templates is the ability to perform logical
 operations.
 
-	# common config
-	export EDITOR=vi
+```
+# common config
+export EDITOR=vi
 
-	# machine-specific configuration
-	{{- if eq .chezmoi.hostname "work-laptop" }}
-	# this will only be included in ~/.bashrc on work-laptop
-	{{- end }}
+# machine-specific configuration
+{{- if eq .chezmoi.hostname "work-laptop" }}
+# this will only be included in ~/.bashrc on work-laptop
+{{- end }}
+```
 
 In this example chezmoi will look at the hostname of the machine and if that is
 equal to "work-laptop", the text between the `if` and the `end` will be included
@@ -210,9 +255,11 @@ You can also create more complicated expressions. The `eq` command can accept
 multiple arguments. It will check if the first argument is equal to any of the
 other arguments.
 
-	{{ if eq "foo" "foo" "bar" }}one{{end}}
-	{{ if eq "foo" "bar" "foo" }}hello{{end}}
-	{{ if eq "foo" "bar" "bar" }}hello{{end}}
+```
+{{ if eq "foo" "foo" "bar" }}hello{{end}}
+{{ if eq "foo" "bar" "foo" }}hello{{end}}
+{{ if eq "foo" "bar" "bar" }}hello{{end}}
+```
 
 The first two examples will output `hello` and the last example will output
 nothing.
@@ -223,9 +270,11 @@ The operators `or` and `and` can also accept multiple arguments.
 
 You can perform multiple checks in one if statement.
 
-	{{ if (and (eq .chezmoi.os "linux") (ne .email "john@home.org")) }}
-	...
-	{{ end }}
+```
+{{ if (and (eq .chezmoi.os "linux") (ne .email "me@home.org")) }}
+...
+{{ end }}
+```
 
 This will check if the operating system is Linux and the configured email is not
 the home email. The brackets are needed here, because otherwise all the
@@ -254,16 +303,45 @@ are currently on. A list of the variables defined by chezmoi can be found
 There are, however more variables than that. To view the variables available on
 your system, execute:
 
-	chezmoi data
+```console
+$ chezmoi data
+```
 
 This outputs the variables in JSON format by default. To access the variable
 `chezmoi.kernel.osrelease` in a template, use
 
-	{{ .chezmoi.kernel.osrelease }}
+```
+{{ .chezmoi.kernel.osrelease }}
+```
 
 This way you can also access the variables you defined yourself.
 
-## Using .chezmoitemplates for creating similar files
+## Using `.chezmoitemplates`
+
+Files in the `.chezmoitemplates` subdirectory are parsed as templates and are
+available to be included in other templates using the [`template`
+action](https://pkg.go.dev/text/template#hdr-Actions) with a name equal to their
+relative path to the `.chezmoitemplates` directory.
+
+By default, such templates will be executed with `nil` data. If you want to
+access template variables (e.g. `.chezmoi.os`) in the template you must pass the
+data explicitly.
+
+For example:
+
+```
+.chezmoitemplates/part.tmpl:
+{{ if eq .chezmoi.os "linux" }}
+# linux config
+{{ else }}
+# non-linux config
+{{ end }}
+
+dot_file.tmpl:
+{{ template "part.tmpl" . }}
+```
+
+## Using `.chezmoitemplates` for creating similar files
 
 When you have multiple similar files, but they aren't quite the same, you can
 create a template file in the directory `.chezmoitemplates`. This template can
@@ -271,32 +349,40 @@ be inserted in other template files, for example:
 
 Create `.local/share/chezmoi/.chezmoitemplates/alacritty`:
 
-	some: config
-	fontsize: {{ . }}
-	somemore: config
+```
+some: config
+fontsize: {{ . }}
+more: config
+```
 
 Notice the file name doesn't have to end in `.tmpl`, as all files in the
-directory `.chemzoitemplates` are interpreted as templates.
+directory `.chezmoitemplates` are interpreted as templates.
 
 Create other files using the template `.local/share/chezmoi/small-font.yml.tmpl`
 
-    {{- template "alacritty" 12 -}}
+```
+{{- template "alacritty" 12 -}}
+```
 
 `.local/share/chezmoi/big-font.yml.tmpl`
 
-    {{- template "alacritty" 18 -}}
+```
+{{- template "alacritty" 18 -}}
+```
 
 Here we're calling the shared `alacritty` template with the font size as the
 `.` value passed in. You can test this with `chezmoi cat`:
 
-    $ chezmoi cat ~/small-font.yml
-    some: config
-    fontsize: 12
-    somemore: config
-    $ chezmoi cat ~/big-font.yml
-    some: config
-    fontsize: 18
-    somemore: config
+```console
+$ chezmoi cat ~/small-font.yml
+some: config
+fontsize: 12
+more: config
+$ chezmoi cat ~/big-font.yml
+some: config
+fontsize: 18
+more: config
+```
 
 ### Passing multiple arguments
 
@@ -320,14 +406,18 @@ them in the file `.config/chezmoi/.chezmoi.toml`:
 
 Use the variables in `.local/share/chezmoi/.chezmoitemplates/alacritty`:
 
-    some: config
-    fontsize: {{ .fontsize }}
-    font: {{ .font }}
-    somemore: config
+```
+some: config
+fontsize: {{ .fontsize }}
+font: {{ .font }}
+more: config
+```
 
 And connect them with `.local/share/chezmoi/small-font.yml.tmpl`:
 
-    {{- template "alacritty" .alacritty.small -}}
+```
+{{- template "alacritty" .alacritty.small -}}
+```
 
 At the moment, this means that you'll have to duplicate the alacritty data in
 the config file on every machine, but a feature will be added to avoid this.
@@ -337,4 +427,6 @@ the config file on every machine, but a feature will be added to avoid this.
 Using the same alacritty configuration as above, you can pass the arguments to
 it with a dictionary, for example `.local/share/chezmoi/small-font.yml.tmpl`:
 
-    {{- template "alacritty" dict "fontsize" 12 "font" "DejaVu Sans Mono" -}}
+```
+{{- template "alacritty" dict "fontsize" 12 "font" "DejaVu Sans Mono" -}}
+```

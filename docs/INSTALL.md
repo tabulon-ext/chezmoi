@@ -1,4 +1,4 @@
-# chezmoi Install Guide
+# chezmoi install guide
 
 <!--- toc --->
 * [One-line binary install](#one-line-binary-install)
@@ -11,20 +11,38 @@
 ## One-line binary install
 
 Install the correct binary for your operating system and architecture in `./bin`
-with a single command.
+with a single command:
 
-    curl -sfL https://git.io/chezmoi | sh
+```console
+$ sh -c "$(curl -fsLS git.io/chezmoi)"
+```
 
-Or on systems with Powershell, you can use this command:
+Or, if you have `wget` instead of `curl`:
 
-    # To install in ./bin
-    (iwr https://git.io/chezmoi.ps1).Content | powershell -c -
+```console
+$ sh -c "$(wget -qO- git.io/chezmoi)"
+```
 
-    # To install in another location
-    '$params = "-BinDir ~/other"', (iwr https://git.io/chezmoi.ps1).Content | powershell -c -
+If you already have a dotfiles repo using chezmoi on GitHub at
+`https://github.com/<github-username>/dotfiles` then you can install chezmoi and
+your dotfiles with the single command:
 
-    # For information about other options, run
-    '$params = "-?"', (iwr https://git.io/chezmoi.ps1).Content | powershell -c -
+```console
+$ sh -c "$(curl -fsLS git.io/chezmoi)" -- init --apply <github-username>
+```
+
+Or on systems with Powershell, you can use one of the following command:
+
+```
+# To install in ./bin
+(iwr -UseBasicParsing https://git.io/chezmoi.ps1).Content | powershell -c -
+
+# To install in another location
+'$params = "-BinDir ~/other"', (iwr https://git.io/chezmoi.ps1).Content | powershell -c -
+
+# For information about other options, run
+'$params = "-?"', (iwr https://git.io/chezmoi.ps1).Content | powershell -c -
+```
 
 ## One-line package install
 
@@ -43,6 +61,7 @@ Install chezmoi with a single command.
 | macOS        | MacPorts   | `sudo port install chezmoi`                                                                 |
 | Windows      | Scoop      | `scoop bucket add twpayne https://github.com/twpayne/scoop-bucket && scoop install chezmoi` |
 | Windows      | Chocolatey | `choco install chezmoi`                                                                     |
+| FreeBSD      | ports      | `pkg install chezmoi`                                                                       |
 
 ## Pre-built Linux packages
 
@@ -79,6 +98,8 @@ page](https://github.com/twpayne/chezmoi/releases/latest).
 
 Download, build, and install chezmoi for your system:
 
-    go install github.com/twpayne/chezmoi@latest
+```console
+$ go install github.com/twpayne/chezmoi@latest
+```
 
 Building chezmoi requires Go 1.16 or later.

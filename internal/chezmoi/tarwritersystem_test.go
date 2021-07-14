@@ -8,9 +8,9 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	vfs "github.com/twpayne/go-vfs/v2"
+	vfs "github.com/twpayne/go-vfs/v3"
 
-	"github.com/twpayne/chezmoi/internal/chezmoitest"
+	"github.com/twpayne/chezmoi/v2/internal/chezmoitest"
 )
 
 var _ System = &TARWriterSystem{}
@@ -31,8 +31,8 @@ func TestTARWriterSystem(t *testing.T) {
 			"run_script":      "# contents of script\n",
 			"symlink_symlink": ".dir/subdir/file\n",
 		},
-	}, func(fs vfs.FS) {
-		system := NewRealSystem(fs)
+	}, func(fileSystem vfs.FS) {
+		system := NewRealSystem(fileSystem)
 		s := NewSourceState(
 			WithSourceDir("/home/user/.local/share/chezmoi"),
 			WithSystem(system),
@@ -59,13 +59,13 @@ func TestTARWriterSystem(t *testing.T) {
 			{
 				expectedTypeflag: tar.TypeDir,
 				expectedName:     ".dir/",
-				expectedMode:     0o777,
+				expectedMode:     0o777 &^ int64(chezmoitest.Umask),
 			},
 			{
 				expectedTypeflag: tar.TypeReg,
 				expectedName:     ".dir/file",
 				expectedContents: []byte("# contents of .dir/file\n"),
-				expectedMode:     0o666,
+				expectedMode:     0o666 &^ int64(chezmoitest.Umask),
 			},
 			{
 				expectedTypeflag: tar.TypeReg,

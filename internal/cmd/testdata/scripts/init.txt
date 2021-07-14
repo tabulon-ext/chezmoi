@@ -1,0 +1,113 @@
+mkgitconfig
+mkhomedir golden
+mkhomedir
+
+# test that chezmoi init creates a git repo
+chezmoi init
+exists $CHEZMOISOURCEDIR/.git
+
+# create a commit
+cp golden/chezmoi.toml $CHEZMOISOURCEDIR/.chezmoi.toml.tmpl
+cp golden/.file $CHEZMOISOURCEDIR/dot_file
+chezmoi git add .
+chezmoi git commit -- --message 'Initial commit'
+
+# test that chezmoi init fetches git repo but does not apply
+chhome home2/user
+mkgitconfig
+chezmoi init file://$WORK/home/user/.local/share/chezmoi
+exists $CHEZMOISOURCEDIR/.git
+! exists $HOME/.file
+
+# test that chezmoi init --apply fetches a git repo and runs chezmoi apply
+chhome home3/user
+mkgitconfig
+chezmoi init --apply --force file://$WORK/home/user/.local/share/chezmoi
+exists $CHEZMOISOURCEDIR/.git
+cmp $HOME/.file golden/.file
+
+# test that chezmoi init --apply --depth 1 --force --purge clones, applies, and purges
+chhome home4/user
+mkgitconfig
+exists $CHEZMOICONFIGDIR
+! exists $CHEZMOISOURCEDIR
+chezmoi init --apply --depth 1 --force --purge file://$WORK/home/user/.local/share/chezmoi
+cmp $HOME/.file golden/.file
+! exists $CHEZMOICONFIGDIR
+! exists $CHEZMOISOURCEDIR
+
+# test that chezmoi init does not clone the repo if it is already checked out but does create the config file
+chhome home5/user
+mkgitconfig
+chezmoi init --source=$HOME/dotfiles file://$WORK/nonexistentrepo
+exists $CHEZMOICONFIGDIR/chezmoi.toml
+
+# test chezmoi init --one-shot
+chhome home6/user
+mkgitconfig
+chezmoi init --one-shot file://$WORK/home/user/.local/share/chezmoi
+cmp $HOME/.file golden/.file
+! exists $CHEZMOICONFIGDIR
+! exists $CHEZMOISOURCEDIR
+
+# test chezmoi init --data=true
+chhome home7/user
+mkgitconfig
+chezmoi init --data=true file://$WORK/home/user/.local/share/chezmoi
+cmp $CHEZMOICONFIGDIR/chezmoi.toml golden/chezmoi.toml
+
+# test chezmoi init --data=false
+chezmoi init --data=false file://$WORK/home/user/.local/share/chezmoi
+cmp $CHEZMOICONFIGDIR/chezmoi.toml golden/chezmoi.toml-no-data
+
+# test that chezmoi init fails if the generated config is not valid
+chhome home8/user
+mkgitconfig
+! chezmoi init
+stderr 'parsing error'
+! exists .config/chezmoi
+
+# test chezmoi init --branch
+chhome home/user
+chezmoi git checkout -- -b new-branch
+edit $CHEZMOISOURCEDIR/dot_file
+chezmoi git add dot_file
+chezmoi git commit -- --message 'Edit .file'
+chezmoi git checkout master
+chhome home9/user
+mkgitconfig
+chezmoi init --apply --branch=new-branch file://$WORK/home/user/.local/share/chezmoi
+grep '# edited' $HOME/.file
+
+# test chezmoi init --config-path
+chhome home10/user
+mkgitconfig
+chezmoi init --config-path=$HOME/.chezmoi.toml --debug file://$WORK/home/user/.local/share/chezmoi
+cmp $HOME/.chezmoi.toml golden/chezmoi.toml
+! exists $CHEZMOICONFIGDIR/chezmoi.toml
+
+-- golden/chezmoi.toml --
+[data]
+    email = "firstname.lastname@company.com"
+-- golden/chezmoi.toml-no-data --
+[data]
+    email = "me@home.org"
+-- home4/user/.config/chezmoi/chezmoi.toml --
+-- home5/user/dotfiles/.git/.keep --
+-- home5/user/dotfiles/.chezmoi.toml.tmpl --
+[data]
+    email = "me@home.org"
+-- home7/user/.config/chezmoi/chezmoi.toml --
+[data]
+    email = "firstname.lastname@company.com"
+-- home7/user/.local/share/chezmoi/.git/.keep --
+-- home7/user/.local/share/chezmoi/.chezmoi.toml.tmpl --
+{{- $email := get . "email" -}}
+{{- if not $email -}}
+{{-   $email = "me@home.org" -}}
+{{- end -}}
+[data]
+    email = {{ $email | quote }}
+-- home8/user/.local/share/chezmoi/.chezmoi.toml.tmpl --
+[diff]
+exclude: ["scripts"]

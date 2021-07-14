@@ -10,13 +10,6 @@ type SourceRelPath struct {
 	isDir   bool
 }
 
-// SourceRelPaths is a slice of SourceRelPaths that implements sort.Interface.
-type SourceRelPaths []SourceRelPath
-
-func (ps SourceRelPaths) Len() int           { return len(ps) }
-func (ps SourceRelPaths) Less(i, j int) bool { return string(ps[i].relPath) < string(ps[j].relPath) }
-func (ps SourceRelPaths) Swap(i, j int)      { ps[i], ps[j] = ps[j], ps[i] }
-
 // NewSourceRelDirPath returns a new SourceRelPath for a directory.
 func NewSourceRelDirPath(relPath RelPath) SourceRelPath {
 	return SourceRelPath{
@@ -47,12 +40,13 @@ func (p SourceRelPath) Empty() bool {
 
 // Join appends elems to p.
 func (p SourceRelPath) Join(elems ...SourceRelPath) SourceRelPath {
-	elemRelPaths := make(RelPaths, 0, len(elems))
+	elemRelPaths := make([]RelPath, 0, len(elems))
 	for _, elem := range elems {
 		elemRelPaths = append(elemRelPaths, elem.relPath)
 	}
 	return SourceRelPath{
 		relPath: p.relPath.Join(elemRelPaths...),
+		isDir:   elems[len(elems)-1].isDir,
 	}
 }
 

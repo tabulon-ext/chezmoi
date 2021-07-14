@@ -1,8 +1,8 @@
 package chezmoi
 
 import (
+	"io/fs"
 	"net/http"
-	"os"
 	"strings"
 	"time"
 
@@ -56,7 +56,7 @@ func (p *gitDiffPatch) Message() string               { return p.message }
 
 // DiffPatch returns a github.com/go-git/go-git/plumbing/format/diff.Patch for
 // path from the given data and mode to the given data and mode.
-func DiffPatch(path RelPath, fromData []byte, fromMode os.FileMode, toData []byte, toMode os.FileMode) (diff.Patch, error) {
+func DiffPatch(path RelPath, fromData []byte, fromMode fs.FileMode, toData []byte, toMode fs.FileMode) (diff.Patch, error) {
 	isBinary := isBinary(fromData) || isBinary(toData)
 
 	var from diff.File
@@ -102,6 +102,9 @@ func DiffPatch(path RelPath, fromData []byte, fromMode os.FileMode, toData []byt
 	}, nil
 }
 
+// diffChunks returns the
+// github.com/go-git/go-git/v5/plumbing/format/diff.Chunks required to transform
+// from into to.
 func diffChunks(from, to string) []diff.Chunk {
 	dmp := diffmatchpatch.New()
 	dmp.DiffTimeout = time.Second
@@ -118,7 +121,9 @@ func diffChunks(from, to string) []diff.Chunk {
 	return chunks
 }
 
-func diffFileMode(mode os.FileMode) (filemode.FileMode, error) {
+// diffFileMode converts an io/fs.FileMode into a
+// github.com/go-git/go-git/v5/plumbing/format/diff.FileMode.
+func diffFileMode(mode fs.FileMode) (filemode.FileMode, error) {
 	fileMode, err := filemode.NewFromOSFileMode(mode)
 	if err != nil {
 		return 0, err
@@ -127,6 +132,7 @@ func diffFileMode(mode os.FileMode) (filemode.FileMode, error) {
 	return fileMode, nil
 }
 
+// isBinary returns true if data contains binary (non-human-readable) data.
 func isBinary(data []byte) bool {
 	return len(data) != 0 && !strings.HasPrefix(http.DetectContentType(data), "text/")
 }

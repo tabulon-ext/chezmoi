@@ -2,11 +2,12 @@ package chezmoi
 
 import (
 	"bytes"
+	"os"
 	"os/exec"
 
 	"github.com/rs/zerolog/log"
 
-	"github.com/twpayne/chezmoi/internal/chezmoilog"
+	"github.com/twpayne/chezmoi/v2/internal/chezmoilog"
 )
 
 // An AGEEncryption uses age for encryption and decryption. See
@@ -16,11 +17,13 @@ type AGEEncryption struct {
 	Args            []string
 	Identity        string
 	Identities      []string
+	Passphrase      bool
 	Recipient       string
 	Recipients      []string
-	RecipientsFile  string
-	RecipientsFiles []string
+	RecipientsFile  AbsPath
+	RecipientsFiles []AbsPath
 	Suffix          string
+	Symmetric       bool
 }
 
 // Decrypt implements Encyrption.Decrypt.
@@ -28,6 +31,7 @@ func (e *AGEEncryption) Decrypt(ciphertext []byte) ([]byte, error) {
 	//nolint:gosec
 	cmd := exec.Command(e.Command, append(e.decryptArgs(), e.Args...)...)
 	cmd.Stdin = bytes.NewReader(ciphertext)
+	cmd.Stderr = os.Stderr
 	plaintext, err := chezmoilog.LogCmdOutput(log.Logger, cmd)
 	if err != nil {
 		return nil, err
@@ -36,10 +40,11 @@ func (e *AGEEncryption) Decrypt(ciphertext []byte) ([]byte, error) {
 }
 
 // DecryptToFile implements Encryption.DecryptToFile.
-func (e *AGEEncryption) DecryptToFile(filename string, ciphertext []byte) error {
+func (e *AGEEncryption) DecryptToFile(plaintextFilename string, ciphertext []byte) error {
 	//nolint:gosec
-	cmd := exec.Command(e.Command, append(append(e.decryptArgs(), "--output", filename), e.Args...)...)
+	cmd := exec.Command(e.Command, append(append(e.decryptArgs(), "--output", plaintextFilename), e.Args...)...)
 	cmd.Stdin = bytes.NewReader(ciphertext)
+	cmd.Stderr = os.Stderr
 	return chezmoilog.LogCmdRun(log.Logger, cmd)
 }
 
@@ -48,6 +53,7 @@ func (e *AGEEncryption) Encrypt(plaintext []byte) ([]byte, error) {
 	//nolint:gosec
 	cmd := exec.Command(e.Command, append(e.encryptArgs(), e.Args...)...)
 	cmd.Stdin = bytes.NewReader(plaintext)
+	cmd.Stderr = os.Stderr
 	ciphertext, err := chezmoilog.LogCmdOutput(log.Logger, cmd)
 	if err != nil {
 		return nil, err
@@ -56,9 +62,10 @@ func (e *AGEEncryption) Encrypt(plaintext []byte) ([]byte, error) {
 }
 
 // EncryptFile implements Encryption.EncryptFile.
-func (e *AGEEncryption) EncryptFile(filename string) ([]byte, error) {
+func (e *AGEEncryption) EncryptFile(plaintextFilename string) ([]byte, error) {
 	//nolint:gosec
-	cmd := exec.Command(e.Command, append(append(e.encryptArgs(), e.Args...), filename)...)
+	cmd := exec.Command(e.Command, append(append(e.encryptArgs(), e.Args...), plaintextFilename)...)
+	cmd.Stderr = os.Stderr
 	return chezmoilog.LogCmdOutput(log.Logger, cmd)
 }
 
@@ -67,32 +74,52 @@ func (e *AGEEncryption) EncryptedSuffix() string {
 	return e.Suffix
 }
 
+// decryptArgs returns the arguments for decryption.
 func (e *AGEEncryption) decryptArgs() []string {
-	args := make([]string, 0, 1+2*(1+len(e.Identities)))
+	var args []string
 	args = append(args, "--decrypt")
+	if !e.Passphrase {
+		args = append(args, e.identityArgs()...)
+	}
+	return args
+}
+
+// encryptArgs returns the arguments for encryption.
+func (e *AGEEncryption) encryptArgs() []string {
+	var args []string
+	args = append(args,
+		"--armor",
+		"--encrypt",
+	)
+	switch {
+	case e.Passphrase:
+		args = append(args, "--passphrase")
+	case e.Symmetric:
+		args = append(args, e.identityArgs()...)
+	default:
+		if e.Recipient != "" {
+			args = append(args, "--recipient", e.Recipient)
+		}
+		for _, recipient := range e.Recipients {
+			args = append(args, "--recipient", recipient)
+		}
+		if e.RecipientsFile != "" {
+			args = append(args, "--recipients-file", string(e.RecipientsFile))
+		}
+		for _, recipientsFile := range e.RecipientsFiles {
+			args = append(args, "--recipients-file", string(recipientsFile))
+		}
+	}
+	return args
+}
+
+func (e *AGEEncryption) identityArgs() []string {
+	args := make([]string, 0, 2+2*len(e.Identities))
 	if e.Identity != "" {
 		args = append(args, "--identity", e.Identity)
 	}
 	for _, identity := range e.Identities {
 		args = append(args, "--identity", identity)
-	}
-	return args
-}
-
-func (e *AGEEncryption) encryptArgs() []string {
-	args := make([]string, 0, 1+2*(1+len(e.Recipients))+2*(1+len(e.RecipientsFiles)))
-	args = append(args, "--armor")
-	if e.Recipient != "" {
-		args = append(args, "--recipient", e.Recipient)
-	}
-	for _, recipient := range e.Recipients {
-		args = append(args, "--recipient", recipient)
-	}
-	if e.RecipientsFile != "" {
-		args = append(args, "--recipients-file", e.RecipientsFile)
-	}
-	for _, recipientsFile := range e.RecipientsFiles {
-		args = append(args, "--recipients-file", recipientsFile)
 	}
 	return args
 }

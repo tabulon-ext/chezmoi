@@ -5,8 +5,9 @@ import (
 	"bytes"
 	"crypto/sha256"
 	"fmt"
-	"os"
+	"io/fs"
 	"path/filepath"
+	"regexp"
 	"strings"
 )
 
@@ -18,10 +19,10 @@ var (
 	Skip = filepath.SkipDir
 
 	// Umask is the process's umask.
-	Umask = os.FileMode(0)
+	Umask = fs.FileMode(0)
 )
 
-// Suffixes and prefixes.
+// Prefixes and suffixes.
 const (
 	ignorePrefix     = "."
 	afterPrefix      = "after_"
@@ -32,11 +33,13 @@ const (
 	encryptedPrefix  = "encrypted_"
 	exactPrefix      = "exact_"
 	executablePrefix = "executable_"
+	literalPrefix    = "literal_"
 	modifyPrefix     = "modify_"
 	oncePrefix       = "once_"
 	privatePrefix    = "private_"
 	runPrefix        = "run_"
 	symlinkPrefix    = "symlink_"
+	literalSuffix    = ".literal"
 	TemplateSuffix   = ".tmpl"
 )
 
@@ -51,29 +54,36 @@ const (
 	versionName      = Prefix + "version"
 )
 
-var knownPrefixedFiles = map[string]bool{
-	Prefix + ".json" + TemplateSuffix: true,
-	Prefix + ".toml" + TemplateSuffix: true,
-	Prefix + ".yaml" + TemplateSuffix: true,
-	dataName:                          true,
-	ignoreName:                        true,
-	removeName:                        true,
-	versionName:                       true,
-}
+var (
+	dirPrefixRegexp  = regexp.MustCompile(`\A(dot|exact|literal|private)_`)
+	filePrefixRegexp = regexp.MustCompile(`\A(after|before|create|dot|empty|encrypted|executable|literal|modify|once|private|run|symlink)_`)
+	fileSuffixRegexp = regexp.MustCompile(`\.(literal|tmpl)\z`)
+)
 
-var modeTypeNames = map[os.FileMode]string{
+// knownPrefixedFiles is a set of known filenames with the .chezmoi prefix.
+var knownPrefixedFiles = newStringSet(
+	Prefix+".json"+TemplateSuffix,
+	Prefix+".toml"+TemplateSuffix,
+	Prefix+".yaml"+TemplateSuffix,
+	dataName,
+	ignoreName,
+	removeName,
+	versionName,
+)
+
+var modeTypeNames = map[fs.FileMode]string{
 	0:                 "file",
-	os.ModeDir:        "dir",
-	os.ModeSymlink:    "symlink",
-	os.ModeNamedPipe:  "named pipe",
-	os.ModeSocket:     "socket",
-	os.ModeDevice:     "device",
-	os.ModeCharDevice: "char device",
+	fs.ModeDir:        "dir",
+	fs.ModeSymlink:    "symlink",
+	fs.ModeNamedPipe:  "named pipe",
+	fs.ModeSocket:     "socket",
+	fs.ModeDevice:     "device",
+	fs.ModeCharDevice: "char device",
 }
 
 type errDuplicateTarget struct {
 	targetRelPath  RelPath
-	sourceRelPaths SourceRelPaths
+	sourceRelPaths []SourceRelPath
 }
 
 func (e *errDuplicateTarget) Error() string {
@@ -104,7 +114,7 @@ func (e *errNotInRelDir) Error() string {
 
 type errUnsupportedFileType struct {
 	absPath AbsPath
-	mode    os.FileMode
+	mode    fs.FileMode
 }
 
 func (e *errUnsupportedFileType) Error() string {
@@ -117,15 +127,14 @@ func SHA256Sum(data []byte) []byte {
 	return sha256SumArr[:]
 }
 
-// SuspiciousSourceDirEntry returns true if base is a suspicous dir entry.
-func SuspiciousSourceDirEntry(base string, info os.FileInfo) bool {
-	//nolint:exhaustive
-	switch info.Mode() & os.ModeType {
+// SuspiciousSourceDirEntry returns true if base is a suspicious dir entry.
+func SuspiciousSourceDirEntry(base string, info fs.FileInfo) bool {
+	switch info.Mode().Type() {
 	case 0:
-		return strings.HasPrefix(base, Prefix) && !knownPrefixedFiles[base]
-	case os.ModeDir:
+		return strings.HasPrefix(base, Prefix) && !knownPrefixedFiles.contains(base)
+	case fs.ModeDir:
 		return strings.HasPrefix(base, Prefix) && base != templatesDirName
-	case os.ModeSymlink:
+	case fs.ModeSymlink:
 		return strings.HasPrefix(base, Prefix)
 	default:
 		return true
@@ -138,11 +147,12 @@ func isEmpty(data []byte) bool {
 	return len(bytes.TrimSpace(data)) == 0
 }
 
-func modeTypeName(mode os.FileMode) string {
-	if name, ok := modeTypeNames[mode&os.ModeType]; ok {
+// modeTypeName returns a string representation of mode.
+func modeTypeName(mode fs.FileMode) string {
+	if name, ok := modeTypeNames[mode.Type()]; ok {
 		return name
 	}
-	return fmt.Sprintf("0o%o: unknown type", mode&os.ModeType)
+	return fmt.Sprintf("0o%o: unknown type", mode.Type())
 }
 
 // mustTrimPrefix is like strings.TrimPrefix but panics if s is not prefixed by

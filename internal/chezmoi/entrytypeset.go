@@ -1,11 +1,12 @@
 package chezmoi
 
-// FIXME Add IncludeEncrypted
-
 import (
 	"fmt"
-	"os"
+	"io/fs"
+	"reflect"
 	"strings"
+
+	"github.com/mitchellh/mapstructure"
 )
 
 // An EntryTypeSet is a set of entry types. It parses and prints as a
@@ -74,13 +75,13 @@ func (s *EntryTypeSet) IncludeEncrypted() bool {
 }
 
 // IncludeFileInfo returns true if the type of info is a member.
-func (s *EntryTypeSet) IncludeFileInfo(info os.FileInfo) bool {
+func (s *EntryTypeSet) IncludeFileInfo(info fs.FileInfo) bool {
 	switch {
 	case info.IsDir():
 		return s.bits&EntryTypeDirs != 0
 	case info.Mode().IsRegular():
 		return s.bits&EntryTypeFiles != 0
-	case info.Mode()&os.ModeType == os.ModeSymlink:
+	case info.Mode().Type() == fs.ModeSymlink:
 		return s.bits&EntryTypeSymlinks != 0
 	default:
 		return false
@@ -113,9 +114,13 @@ func (s *EntryTypeSet) Set(str string) error {
 		s.bits = EntryTypesNone
 		return nil
 	}
+	return s.SetSlice(strings.Split(str, ","))
+}
 
-	var bits EntryTypeBits
-	for i, element := range strings.Split(str, ",") {
+// SetSlice sets s from a []string.
+func (s *EntryTypeSet) SetSlice(ss []string) error {
+	bits := EntryTypesNone
+	for i, element := range ss {
 		if element == "" {
 			continue
 		}
@@ -142,6 +147,9 @@ func (s *EntryTypeSet) Set(str string) error {
 }
 
 func (s *EntryTypeSet) String() string {
+	if s == nil {
+		return "none"
+	}
 	//nolint:exhaustive
 	switch s.bits {
 	case EntryTypesAll:
@@ -166,6 +174,9 @@ func (s *EntryTypeSet) String() string {
 
 // Sub returns a copy of s with the elements of other removed.
 func (s *EntryTypeSet) Sub(other *EntryTypeSet) *EntryTypeSet {
+	if other == nil {
+		return s
+	}
 	return &EntryTypeSet{
 		bits: (s.bits &^ other.bits) & EntryTypesAll,
 	}
@@ -173,5 +184,33 @@ func (s *EntryTypeSet) Sub(other *EntryTypeSet) *EntryTypeSet {
 
 // Type implements github.com/spf13/pflag.Value.Type.
 func (s *EntryTypeSet) Type() string {
-	return "entry type set"
+	return "types"
+}
+
+// StringSliceToEntryTypeSetHookFunc is a
+// github.com/mitchellh/mapstructure.DecodeHookFunc that parses an EntryTypeSet
+// from a []string.
+func StringSliceToEntryTypeSetHookFunc() mapstructure.DecodeHookFunc {
+	return func(from, to reflect.Type, data interface{}) (interface{}, error) {
+		if to != reflect.TypeOf(EntryTypeSet{}) {
+			return data, nil
+		}
+		sl, ok := data.([]interface{})
+		if !ok {
+			return nil, fmt.Errorf("expected a []string, got a %T", data)
+		}
+		ss := make([]string, 0, len(sl))
+		for _, i := range sl {
+			s, ok := i.(string)
+			if !ok {
+				return nil, fmt.Errorf("expected a []string, got a %T element", i)
+			}
+			ss = append(ss, s)
+		}
+		s := NewEntryTypeSet(EntryTypesNone)
+		if err := s.SetSlice(ss); err != nil {
+			return nil, err
+		}
+		return s, nil
+	}
 }

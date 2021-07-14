@@ -3,7 +3,7 @@ package chezmoi
 import (
 	"archive/tar"
 	"io"
-	"os"
+	"io/fs"
 )
 
 // A TARWriterSystem is a System that writes to a TAR archive.
@@ -28,7 +28,7 @@ func (s *TARWriterSystem) Close() error {
 }
 
 // Mkdir implements System.Mkdir.
-func (s *TARWriterSystem) Mkdir(name AbsPath, perm os.FileMode) error {
+func (s *TARWriterSystem) Mkdir(name AbsPath, perm fs.FileMode) error {
 	header := s.headerTemplate
 	header.Typeflag = tar.TypeDir
 	header.Name = string(name) + "/"
@@ -37,12 +37,12 @@ func (s *TARWriterSystem) Mkdir(name AbsPath, perm os.FileMode) error {
 }
 
 // RunScript implements System.RunScript.
-func (s *TARWriterSystem) RunScript(scriptname RelPath, dir AbsPath, data []byte) error {
+func (s *TARWriterSystem) RunScript(scriptname RelPath, dir AbsPath, data []byte, interpreter *Interpreter) error {
 	return s.WriteFile(AbsPath(scriptname), data, 0o700)
 }
 
 // WriteFile implements System.WriteFile.
-func (s *TARWriterSystem) WriteFile(filename AbsPath, data []byte, perm os.FileMode) error {
+func (s *TARWriterSystem) WriteFile(filename AbsPath, data []byte, perm fs.FileMode) error {
 	header := s.headerTemplate
 	header.Typeflag = tar.TypeReg
 	header.Name = string(filename)

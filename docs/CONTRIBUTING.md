@@ -1,4 +1,4 @@
-# chezmoi Contributing Guide
+# chezmoi contributing guide
 
 <!--- toc --->
 * [Getting started](#getting-started)
@@ -15,6 +15,9 @@ chezmoi is written in [Go](https://golang.org) and development happens on
 [GitHub](https://github.com). The rest of this document assumes that you've
 checked out chezmoi locally.
 
+The [Architecture Guide](ARCHITECTURE.md) contains a high-level overview of
+chezmoi's source code.
+
 ## Developing locally
 
 chezmoi requires Go 1.16 or later.
@@ -22,31 +25,43 @@ chezmoi requires Go 1.16 or later.
 chezmoi is a standard Go project, using standard Go tooling, with a few extra
 tools. Ensure that these extra tools are installed with:
 
-    make ensure-tools
+```console
+$ make ensure-tools
+```
 
 Build chezmoi:
 
-    go build .
+```console
+$ go build .
+```
 
 Run all tests:
 
-    go test ./...
+```console
+$ go test ./...
+```
 
 Run chezmoi:
 
-    go run .
+```console
+$ go run .
+```
 
 ## Generated code
 
-chezmoi generates shell completions, embedded files, and the website from a
+chezmoi generates shell completions, the install script, and the website from a
 single source of truth. You must run
 
-    make completions
+```console
+$ go generate
+```
 
 if you change includes any of the following:
 
-* Add or modify a command.
-* Add or modify a command's flags.
+* Adds or modifies a command.
+* Adds or modifies a command's flags.
+* Adds or modifies the list of supported OSs and architectures.
+* Modifies the install script template.
 
 chezmoi's continuous integration verifies that all generated files are up to
 date. Changes to generated files should be included in the commit that modifies
@@ -77,7 +92,7 @@ that:
 * The documentation is updated, if necessary. For new features you should add an
   entry in `docs/HOWTO.md` and a complete description in `docs/REFERENCE.md`.
 
-* All generated files are up to date. You can ensure this by running `go
+* All generated files are up to date. You can ensure this by running `make
   generate` and including any modified files in your commit.
 
 * The code is correctly formatted, according to
@@ -102,12 +117,16 @@ Releases are managed with [`goreleaser`](https://goreleaser.com/).
 
 To build a test release, without publishing, (Linux only) run:
 
-    make test-release
+```console
+$ make test-release
+```
 
 Publish a new release by creating and pushing a tag, e.g.:
 
-    git tag v1.2.3
-    git push --tags
+```console
+$ git tag v1.2.3
+$ git push --tags
+```
 
 This triggers a [GitHub Action](https://github.com/twpayne/chezmoi/actions) that
 builds and publishes archives, packages, and snaps, and creates a new [GitHub
@@ -118,18 +137,22 @@ Publishing [Snaps](https://snapcraft.io/) requires a `SNAPCRAFT_LOGIN`
 secret](https://github.com/twpayne/chezmoi/settings/secrets/actions). Snapcraft
 logins periodically expire. Create a new snapcraft login by running:
 
-    snapcraft export-login --snaps=chezmoi --channels=stable --acls=package_upload -
+```console
+$ snapcraft export-login --snaps=chezmoi --channels=stable --acls=package_upload -
+```
 
 [brew](https://brew.sh/) formula must be updated manually with the command:
 
-    brew bump-formula-pr --tag=v1.2.3 chezmoi
+```console
+$ brew bump-formula-pr --tag=v1.2.3 chezmoi
+```
 
 ## Packaging
 
 If you're packaging chezmoi for an operating system or distribution:
 
 * chezmoi has no build or install dependencies other than the standard Go
-  toolchain.
+  tool chain.
 
 * Please set the version number, git commit, and build time in the binary. This
   greatly assists debugging when end users report problems or ask for help. You
@@ -158,18 +181,6 @@ If you're packaging chezmoi for an operating system or distribution:
   the `.chezmoi.username` and `.chezmoi.group` template variables may not be set
   correctly on some systems.
 
-* chezmoi includes a `docs` command which prints its documentation. By default,
-  the docs are embedded in the binary. You can disable this behavior, and have
-  chezmoi read its docs from the filesystem by building with the `noembeddocs`
-  build tag and setting the directory where chezmoi can find them with the `-X
-  github.com/twpayne/chezmoi/cmd.DocDir=$DOCDIR` linker flag. For example:
-
-  ```
-  go build -tags noembeddocs -ldflags "-X github.com/twpayne/chezmoi/cmd.DocsDir=/usr/share/doc/chezmoi" .
-  ```
-
-  To remove the `docs` command completely, use the `nodocs` build tag.
-
 * chezmoi includes an `upgrade` command which attempts to self-upgrade. You can
   remove this command completely by building chezmoi with the `noupgrade` build
   tag.
@@ -191,25 +202,35 @@ branch](https://github.com/twpayne/chezmoi/tree/gh-pages) to GitHub.
 Before building the website, you must download the [Hugo Book
 Theme](https://github.com/alex-shpak/hugo-book) by running:
 
-    git submodule update --init
+```console
+$ git submodule update --init
+```
 
 Test the website locally by running:
 
-    ( cd chezmoi.io && hugo serve )
+```console
+$ ( cd assets/chezmoi.io && hugo serve )
+```
 
 and visit http://localhost:1313/.
 
 To build the website in a temporary directory, run:
 
-    ( cd chezmoi.io && make )
+```console
+$ ( cd assets/chezmoi.io && make )
+```
 
 From here you can run
 
-    git show
+```console
+$ git show
+```
 
 to show changes and
 
-    git push
+```console
+$ git push
+```
 
 to push them. You can only push changes if you have write permissions to the
 chezmoi GitHub repo.

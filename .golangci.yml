@@ -9,7 +9,6 @@ linters:
   - durationcheck
   - errcheck
   - errorlint
-  - exhaustive
   - exportloopref
   - forbidigo
   - forcetypeassert
@@ -20,27 +19,30 @@ linters:
   - gofmt
   - gofumpt
   - goimports
-  - golint
+  - gomoddirectives
   - gomodguard
   - goprintffuncname
   - gosec
   - gosimple
   - govet
+  - ifshort
   - importas
   - ineffassign
   - makezero
   - misspell
   - nilerr
   - noctx
+  - nolintlint
   - prealloc
   - predeclared
+  - promlinter
   - revive
   - rowserrcheck
-  - scopelint
   - sqlclosecheck
   - staticcheck
   - structcheck
   - stylecheck
+  - tagliatelle
   - thelper
   - typecheck
   - unconvert
@@ -51,6 +53,7 @@ linters:
   - whitespace
   disable:
   - cyclop
+  - exhaustive
   - exhaustivestruct
   - funlen
   - gochecknoglobals
@@ -61,13 +64,11 @@ linters:
   - godox
   - goheader
   - gomnd
-  - ifshort # FIXME re-enable when bugs in ifshort are fixed
   - lll
   - maligned
   - nakedret
   - nestif
   - nlreturn
-  - nolintlint # FIXME re-enable when more reliable
   - paralleltest
   - testpackage
   - tparallel
@@ -78,7 +79,8 @@ linters-settings:
   forbidigo:
     forbid:
     - ^fmt\.Print.*$
-    - ^ioutil\.
+    - ^ioutil\..*$
+    - ^os\.(DirEntry|FileInfo|FileMode|Is.*|Mode.*)$
   gofumpt:
     extra-rules: true
   goimports:
@@ -94,8 +96,7 @@ issues:
   - linters:
     - forbidigo
     - gosec
-    path: ^internal/cmd/
+    path: ^internal/cmds/
   - linters:
     - gosec
-    - scopelint
     path: "_test\\.go$"

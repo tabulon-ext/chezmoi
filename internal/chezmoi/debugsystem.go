@@ -1,13 +1,13 @@
 package chezmoi
 
 import (
-	"os"
+	"io/fs"
 	"os/exec"
 
 	"github.com/rs/zerolog/log"
-	vfs "github.com/twpayne/go-vfs/v2"
+	vfs "github.com/twpayne/go-vfs/v3"
 
-	"github.com/twpayne/chezmoi/internal/chezmoilog"
+	"github.com/twpayne/chezmoi/v2/internal/chezmoilog"
 )
 
 // A DebugSystem logs all calls to a System.
@@ -23,7 +23,7 @@ func NewDebugSystem(system System) *DebugSystem {
 }
 
 // Chmod implements System.Chmod.
-func (s *DebugSystem) Chmod(name AbsPath, mode os.FileMode) error {
+func (s *DebugSystem) Chmod(name AbsPath, mode fs.FileMode) error {
 	err := s.system.Chmod(name, mode)
 	log.Logger.Debug().
 		Str("name", string(name)).
@@ -44,6 +44,18 @@ func (s *DebugSystem) Glob(name string) ([]string, error) {
 	return matches, err
 }
 
+// IdempotentCmdCombinedOutput implements System.IdempotentCmdCombinedOutput.
+func (s *DebugSystem) IdempotentCmdCombinedOutput(cmd *exec.Cmd) ([]byte, error) {
+	output, err := s.system.IdempotentCmdCombinedOutput(cmd)
+	log.Logger.Debug().
+		EmbedObject(chezmoilog.OSExecCmdLogObject{Cmd: cmd}).
+		Bytes("output", chezmoilog.FirstFewBytes(output)).
+		Err(err).
+		EmbedObject(chezmoilog.OSExecExitErrorLogObject{Err: err}).
+		Msg("IdempotentCmdCombinedOutput")
+	return output, err
+}
+
 // IdempotentCmdOutput implements System.IdempotentCmdOutput.
 func (s *DebugSystem) IdempotentCmdOutput(cmd *exec.Cmd) ([]byte, error) {
 	output, err := s.system.IdempotentCmdOutput(cmd)
@@ -57,7 +69,7 @@ func (s *DebugSystem) IdempotentCmdOutput(cmd *exec.Cmd) ([]byte, error) {
 }
 
 // Lstat implements System.Lstat.
-func (s *DebugSystem) Lstat(name AbsPath) (os.FileInfo, error) {
+func (s *DebugSystem) Lstat(name AbsPath) (fs.FileInfo, error) {
 	info, err := s.system.Lstat(name)
 	log.Logger.Debug().
 		Str("name", string(name)).
@@ -67,7 +79,7 @@ func (s *DebugSystem) Lstat(name AbsPath) (os.FileInfo, error) {
 }
 
 // Mkdir implements System.Mkdir.
-func (s *DebugSystem) Mkdir(name AbsPath, perm os.FileMode) error {
+func (s *DebugSystem) Mkdir(name AbsPath, perm fs.FileMode) error {
 	err := s.system.Mkdir(name, perm)
 	log.Logger.Debug().
 		Str("name", string(name)).
@@ -83,7 +95,7 @@ func (s *DebugSystem) RawPath(path AbsPath) (AbsPath, error) {
 }
 
 // ReadDir implements System.ReadDir.
-func (s *DebugSystem) ReadDir(name AbsPath) ([]os.DirEntry, error) {
+func (s *DebugSystem) ReadDir(name AbsPath) ([]fs.DirEntry, error) {
 	dirEntries, err := s.system.ReadDir(name)
 	log.Logger.Debug().
 		Str("name", string(name)).
@@ -147,12 +159,13 @@ func (s *DebugSystem) RunCmd(cmd *exec.Cmd) error {
 }
 
 // RunScript implements System.RunScript.
-func (s *DebugSystem) RunScript(scriptname RelPath, dir AbsPath, data []byte) error {
-	err := s.system.RunScript(scriptname, dir, data)
+func (s *DebugSystem) RunScript(scriptname RelPath, dir AbsPath, data []byte, interpreter *Interpreter) error {
+	err := s.system.RunScript(scriptname, dir, data, interpreter)
 	log.Logger.Debug().
 		Str("scriptname", string(scriptname)).
 		Str("dir", string(dir)).
 		Bytes("data", chezmoilog.FirstFewBytes(data)).
+		Object("interpreter", interpreter).
 		Err(err).
 		EmbedObject(chezmoilog.OSExecExitErrorLogObject{Err: err}).
 		Msg("RunScript")
@@ -160,7 +173,7 @@ func (s *DebugSystem) RunScript(scriptname RelPath, dir AbsPath, data []byte) er
 }
 
 // Stat implements System.Stat.
-func (s *DebugSystem) Stat(name AbsPath) (os.FileInfo, error) {
+func (s *DebugSystem) Stat(name AbsPath) (fs.FileInfo, error) {
 	info, err := s.system.Stat(name)
 	log.Logger.Debug().
 		Str("name", string(name)).
@@ -175,7 +188,7 @@ func (s *DebugSystem) UnderlyingFS() vfs.FS {
 }
 
 // WriteFile implements System.WriteFile.
-func (s *DebugSystem) WriteFile(name AbsPath, data []byte, perm os.FileMode) error {
+func (s *DebugSystem) WriteFile(name AbsPath, data []byte, perm fs.FileMode) error {
 	err := s.system.WriteFile(name, data, perm)
 	log.Logger.Debug().
 		Str("name", string(name)).

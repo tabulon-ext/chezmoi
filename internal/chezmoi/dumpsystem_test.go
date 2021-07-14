@@ -5,9 +5,9 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	vfs "github.com/twpayne/go-vfs/v2"
+	vfs "github.com/twpayne/go-vfs/v3"
 
-	"github.com/twpayne/chezmoi/internal/chezmoitest"
+	"github.com/twpayne/chezmoi/v2/internal/chezmoitest"
 )
 
 var _ System = &DumpSystem{}
@@ -28,8 +28,8 @@ func TestDumpSystem(t *testing.T) {
 			"run_script":      "# contents of script\n",
 			"symlink_symlink": ".dir/subdir/file\n",
 		},
-	}, func(fs vfs.FS) {
-		system := NewRealSystem(fs)
+	}, func(fileSystem vfs.FS) {
+		system := NewRealSystem(fileSystem)
 		s := NewSourceState(
 			WithSourceDir("/home/user/.local/share/chezmoi"),
 			WithSystem(system),
@@ -46,13 +46,13 @@ func TestDumpSystem(t *testing.T) {
 			".dir": &dirData{
 				Type: dataTypeDir,
 				Name: ".dir",
-				Perm: 0o777,
+				Perm: 0o777 &^ chezmoitest.Umask,
 			},
 			".dir/file": &fileData{
 				Type:     dataTypeFile,
 				Name:     ".dir/file",
 				Contents: "# contents of .dir/file\n",
-				Perm:     0o666,
+				Perm:     0o666 &^ chezmoitest.Umask,
 			},
 			"script": &scriptData{
 				Type:     dataTypeScript,

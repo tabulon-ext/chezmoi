@@ -43,27 +43,39 @@ main() {
 
 	log_info "found version ${VERSION} for ${TAGARG}/${GOOS}/${GOARCH}"
 
+	BINSUFFIX=
+	FORMAT=tar.gz
+	GOOS_EXTRA=
 	case "${GOOS}" in
+	linux)
+		case "${GOARCH}" in
+		amd64)
+			case "$(get_libc)" in
+			glibc)
+				GOOS_EXTRA="-glibc"
+				;;
+			musl)
+				GOOS_EXTRA="-musl"
+				;;
+			esac
+		esac
+		;;
 	windows)
 		BINSUFFIX=.exe
 		FORMAT=zip
 		;;
-	*)
-		BINSUFFIX=
-		FORMAT=tar.gz
-		;;
 	esac
 
 	# download tarball
-	NAME="chezmoi_${VERSION}_${GOOS}_${GOARCH}"
+	NAME="chezmoi_${VERSION}_${GOOS}${GOOS_EXTRA}_${GOARCH}"
 	TARBALL="${NAME}.${FORMAT}"
 	TARBALL_URL="${GITHUB_DOWNLOAD}/${TAG}/${TARBALL}"
-	http_download "${tmpdir}/${TARBALL}" "${TARBALL_URL}"
+	http_download "${tmpdir}/${TARBALL}" "${TARBALL_URL}" || exit 1
 
 	# download checksums
 	CHECKSUMS="chezmoi_${VERSION}_checksums.txt"
 	CHECKSUMS_URL="${GITHUB_DOWNLOAD}/${TAG}/${CHECKSUMS}"
-	http_download "${tmpdir}/${CHECKSUMS}" "${CHECKSUMS_URL}"
+	http_download "${tmpdir}/${CHECKSUMS}" "${CHECKSUMS_URL}" || exit 1
 
 	# verify checksums
 	hash_sha256_verify "${tmpdir}/${TARBALL}" "${tmpdir}/${CHECKSUMS}"
@@ -125,6 +137,7 @@ get_goarch() {
 check_goos_goarch() {
 	case "$1" in
 	darwin/amd64) return 0 ;;
+	darwin/arm64) return 0 ;;
 	freebsd/386) return 0 ;;
 	freebsd/amd64) return 0 ;;
 	freebsd/arm) return 0 ;;
@@ -146,6 +159,31 @@ check_goos_goarch() {
 		return 1
 		;;
 	esac
+}
+
+get_libc() {
+	if is_command ldd; then
+		case "$(ldd --version 2>&1 | tr '[:upper:]' '[:lower:]')" in
+		*glibc*|"*gnu libc*")
+			echo glibc
+			return
+			;;
+		*musl*)
+			echo musl
+			return
+			;;
+		esac
+	fi
+	if is_command getconf; then
+		case "$(getconf GNU_LIBC_VERSION 2>&1)" in
+		*glibc*)
+			echo glibc
+			return
+			;;
+		esac
+	fi
+	log_crit "unable to determine libc" 1>&2
+	exit 1
 }
 
 real_tag() {
@@ -196,19 +234,19 @@ http_download_wget() {
 	source_url=$2
 	header=$3
 	if [ -z "${header}" ]; then
-		wget -q -O "${local_file}" "${source_url}"
+		wget -q -O "${local_file}" "${source_url}" || return 1
 	else
-		wget -q --header "${header}" -O "${local_file}" "${source_url}"
+		wget -q --header "${header}" -O "${local_file}" "${source_url}" || return 1
 	fi
 }
 
 http_download() {
 	log_debug "http_download $2"
 	if is_command curl; then
-		http_download_curl "$@"
+		http_download_curl "$@" || return 1
 		return
 	elif is_command wget; then
-		http_download_wget "$@"
+		http_download_wget "$@" || return 1
 		return
 	fi
 	log_crit "http_download unable to find wget or curl"

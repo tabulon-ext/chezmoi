@@ -1,11 +1,5 @@
 package chezmoi
 
-import (
-	"errors"
-)
-
-var errClosed = errors.New("closed")
-
 // A MockPersistentState is a mock persistent state.
 type MockPersistentState struct {
 	buckets map[string]map[string][]byte
@@ -20,18 +14,11 @@ func NewMockPersistentState() *MockPersistentState {
 
 // Close closes s.
 func (s *MockPersistentState) Close() error {
-	if s.buckets == nil {
-		return errClosed
-	}
-	s.buckets = nil
 	return nil
 }
 
 // CopyTo implements PersistentState.CopyTo.
 func (s *MockPersistentState) CopyTo(p PersistentState) error {
-	if s.buckets == nil {
-		return errClosed
-	}
 	for bucket, bucketMap := range s.buckets {
 		for key, value := range bucketMap {
 			if err := p.Set([]byte(bucket), []byte(key), value); err != nil {
@@ -42,11 +29,13 @@ func (s *MockPersistentState) CopyTo(p PersistentState) error {
 	return nil
 }
 
+// Data implements PersistentState.Data.
+func (s *MockPersistentState) Data() (interface{}, error) {
+	return s.buckets, nil
+}
+
 // Delete implements PersistentState.Delete.
 func (s *MockPersistentState) Delete(bucket, key []byte) error {
-	if s.buckets == nil {
-		return errClosed
-	}
 	bucketMap, ok := s.buckets[string(bucket)]
 	if !ok {
 		return nil
@@ -57,9 +46,6 @@ func (s *MockPersistentState) Delete(bucket, key []byte) error {
 
 // ForEach implements PersistentState.ForEach.
 func (s *MockPersistentState) ForEach(bucket []byte, fn func(k, v []byte) error) error {
-	if s.buckets == nil {
-		return errClosed
-	}
 	for k, v := range s.buckets[string(bucket)] {
 		if err := fn([]byte(k), v); err != nil {
 			return err
@@ -70,9 +56,6 @@ func (s *MockPersistentState) ForEach(bucket []byte, fn func(k, v []byte) error)
 
 // Get implements PersistentState.Get.
 func (s *MockPersistentState) Get(bucket, key []byte) ([]byte, error) {
-	if s.buckets == nil {
-		return nil, errClosed
-	}
 	bucketMap, ok := s.buckets[string(bucket)]
 	if !ok {
 		return nil, nil
@@ -82,9 +65,6 @@ func (s *MockPersistentState) Get(bucket, key []byte) ([]byte, error) {
 
 // Set implements PersistentState.Set.
 func (s *MockPersistentState) Set(bucket, key, value []byte) error {
-	if s.buckets == nil {
-		return errClosed
-	}
 	bucketMap, ok := s.buckets[string(bucket)]
 	if !ok {
 		bucketMap = make(map[string][]byte)

@@ -4,8 +4,8 @@ var (
 	// ConfigStateBucket is the bucket for recording the config state.
 	ConfigStateBucket = []byte("configState")
 
-	// entryStateBucket is the bucket for recording the entry states.
-	entryStateBucket = []byte("entryState")
+	// EntryStateBucket is the bucket for recording the entry states.
+	EntryStateBucket = []byte("entryState")
 
 	// scriptStateBucket is the bucket for recording the state of run once
 	// scripts.
@@ -18,6 +18,7 @@ var (
 type PersistentState interface {
 	Close() error
 	CopyTo(s PersistentState) error
+	Data() (interface{}, error)
 	Delete(bucket, key []byte) error
 	ForEach(bucket []byte, fn func(k, v []byte) error) error
 	Get(bucket, key []byte) ([]byte, error)
@@ -30,7 +31,7 @@ func PersistentStateData(s PersistentState) (interface{}, error) {
 	if err != nil {
 		return nil, err
 	}
-	entryStateData, err := persistentStateBucketData(s, entryStateBucket)
+	entryStateData, err := persistentStateBucketData(s, EntryStateBucket)
 	if err != nil {
 		return nil, err
 	}

@@ -1,11 +1,12 @@
 package chezmoi
 
 import (
+	"fmt"
 	"path/filepath"
 	"sort"
 
-	"github.com/bmatcuk/doublestar/v3"
-	vfs "github.com/twpayne/go-vfs/v2"
+	"github.com/bmatcuk/doublestar/v4"
+	vfs "github.com/twpayne/go-vfs/v3"
 )
 
 // A stringSet is a set of strings.
@@ -27,8 +28,8 @@ func newPatternSet() *patternSet {
 
 // add adds a pattern to ps.
 func (ps *patternSet) add(pattern string, include bool) error {
-	if _, err := doublestar.Match(pattern, ""); err != nil {
-		return err
+	if ok := doublestar.ValidatePattern(pattern); !ok {
+		return fmt.Errorf("%s: invalid pattern", pattern)
 	}
 	if include {
 		ps.includePatterns.add(pattern)
@@ -38,13 +39,12 @@ func (ps *patternSet) add(pattern string, include bool) error {
 	return nil
 }
 
-// glob returns all matches in fs.
-func (ps *patternSet) glob(fs vfs.FS, prefix string) ([]string, error) {
+// glob returns all matches in fileSystem.
+func (ps *patternSet) glob(fileSystem vfs.FS, prefix string) ([]string, error) {
 	// FIXME use AbsPath and RelPath
-	vos := doubleStarOS{FS: fs}
 	allMatches := newStringSet()
 	for includePattern := range ps.includePatterns {
-		matches, err := doublestar.GlobOS(vos, prefix+includePattern)
+		matches, err := doublestar.Glob(fileSystem, prefix+includePattern)
 		if err != nil {
 			return nil, err
 		}
@@ -52,7 +52,7 @@ func (ps *patternSet) glob(fs vfs.FS, prefix string) ([]string, error) {
 	}
 	for match := range allMatches {
 		for excludePattern := range ps.excludePatterns {
-			exclude, err := doublestar.PathMatchOS(vos, prefix+excludePattern, match)
+			exclude, err := doublestar.Match(prefix+excludePattern, match)
 			if err != nil {
 				return nil, err
 			}
@@ -96,6 +96,12 @@ func (s stringSet) add(elements ...string) {
 	for _, element := range elements {
 		s[element] = struct{}{}
 	}
+}
+
+// contains returns true if s contains element.
+func (s stringSet) contains(element string) bool {
+	_, ok := s[element]
+	return ok
 }
 
 // elements returns all the elements of s.

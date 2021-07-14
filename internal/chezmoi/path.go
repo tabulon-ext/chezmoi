@@ -2,9 +2,13 @@ package chezmoi
 
 import (
 	"fmt"
+	"os"
 	"path"
 	"path/filepath"
+	"reflect"
 	"strings"
+
+	"github.com/mitchellh/mapstructure"
 )
 
 // An AbsPath is an absolute path.
@@ -12,7 +16,7 @@ type AbsPath string
 
 // NewAbsPath returns a new AbsPath.
 func NewAbsPath(path string) (AbsPath, error) {
-	if filepath.IsAbs(path) {
+	if !filepath.IsAbs(path) {
 		return "", fmt.Errorf("%s: not an absolute path", path)
 	}
 	return AbsPath(path), nil
@@ -47,29 +51,49 @@ func (p AbsPath) MustTrimDirPrefix(dirPrefix AbsPath) RelPath {
 	return relPath
 }
 
+// Set implements github.com/spf13/pflag.Value.Set.
+func (p *AbsPath) Set(s string) error {
+	homeDirAbsPath, err := homeDirAbsPath()
+	if err != nil {
+		return err
+	}
+	absPath, err := NewAbsPathFromExtPath(s, homeDirAbsPath)
+	if err != nil {
+		return err
+	}
+	*p = absPath
+	return nil
+}
+
 // Split returns p's directory and file.
 func (p AbsPath) Split() (AbsPath, RelPath) {
 	dir, file := path.Split(string(p))
 	return AbsPath(dir), RelPath(file)
 }
 
+func (p AbsPath) String() string {
+	return string(p)
+}
+
 // TrimDirPrefix trims prefix from p.
 func (p AbsPath) TrimDirPrefix(dirPrefixAbsPath AbsPath) (RelPath, error) {
-	if !strings.HasPrefix(string(p), string(dirPrefixAbsPath+"/")) {
+	dirAbsPath := dirPrefixAbsPath
+	if dirAbsPath != "/" {
+		dirAbsPath += "/"
+	}
+	if !strings.HasPrefix(string(p), string(dirAbsPath)) {
 		return "", &errNotInAbsDir{
 			pathAbsPath: p,
 			dirAbsPath:  dirPrefixAbsPath,
 		}
 	}
-	return RelPath(p[len(dirPrefixAbsPath)+1:]), nil
+	return RelPath(p[len(dirAbsPath):]), nil
 }
 
-// AbsPaths is a slice of AbsPaths that implements sort.Interface.
-type AbsPaths []AbsPath
-
-func (ps AbsPaths) Len() int           { return len(ps) }
-func (ps AbsPaths) Less(i, j int) bool { return string(ps[i]) < string(ps[j]) }
-func (ps AbsPaths) Swap(i, j int)      { ps[i], ps[j] = ps[j], ps[i] }
+// Type implements github.com/spf13/pflag.Value.Type.
+func (p AbsPath) Type() string {
+	return "path"
+}
 
 // A RelPath is a relative path.
 type RelPath string
@@ -82,6 +106,11 @@ func (p RelPath) Base() string {
 // Dir returns p's directory.
 func (p RelPath) Dir() RelPath {
 	return RelPath(path.Dir(string(p)))
+}
+
+// Ext returns p's extension.
+func (p RelPath) Ext() string {
+	return path.Ext(string(p))
 }
 
 // HasDirPrefix returns true if p has dir prefix dirPrefix.
@@ -116,9 +145,34 @@ func (p RelPath) TrimDirPrefix(dirPrefix RelPath) (RelPath, error) {
 	return p[len(dirPrefix)+1:], nil
 }
 
-// RelPaths is a slice of RelPaths that implements sort.Interface.
-type RelPaths []RelPath
+// StringToAbsPathHookFunc is a github.com/mitchellh/mapstructure.DecodeHookFunc
+// that parses an AbsPath from a string.
+func StringToAbsPathHookFunc() mapstructure.DecodeHookFunc {
+	return func(from, to reflect.Type, data interface{}) (interface{}, error) {
+		if to != reflect.TypeOf(AbsPath("")) {
+			return data, nil
+		}
+		s, ok := data.(string)
+		if !ok {
+			return nil, fmt.Errorf("expected a string, got a %T", data)
+		}
+		var absPath AbsPath
+		if err := absPath.Set(s); err != nil {
+			return nil, err
+		}
+		return absPath, nil
+	}
+}
 
-func (ps RelPaths) Len() int           { return len(ps) }
-func (ps RelPaths) Less(i, j int) bool { return string(ps[i]) < string(ps[j]) }
-func (ps RelPaths) Swap(i, j int)      { ps[i], ps[j] = ps[j], ps[i] }
+// homeDirAbsPath returns the user's home directory as an AbsPath.
+func homeDirAbsPath() (AbsPath, error) {
+	userHomeDir, err := os.UserHomeDir()
+	if err != nil {
+		return AbsPath(""), err
+	}
+	absPath, err := NormalizePath(userHomeDir)
+	if err != nil {
+		return AbsPath(""), err
+	}
+	return absPath, nil
+}

@@ -1,10 +1,10 @@
 package chezmoi
 
 import (
-	"os"
+	"io/fs"
 	"os/exec"
 
-	vfs "github.com/twpayne/go-vfs/v2"
+	vfs "github.com/twpayne/go-vfs/v3"
 )
 
 // A ReadOnlySystem is a system that may only be read from.
@@ -25,13 +25,18 @@ func (s *ReadOnlySystem) Glob(pattern string) ([]string, error) {
 	return s.system.Glob(pattern)
 }
 
+// IdempotentCmdCombinedOutput implements System.IdempotentCmdCombinedOutput.
+func (s *ReadOnlySystem) IdempotentCmdCombinedOutput(cmd *exec.Cmd) ([]byte, error) {
+	return s.system.IdempotentCmdCombinedOutput(cmd)
+}
+
 // IdempotentCmdOutput implements System.IdempotentCmdOutput.
 func (s *ReadOnlySystem) IdempotentCmdOutput(cmd *exec.Cmd) ([]byte, error) {
 	return s.system.IdempotentCmdOutput(cmd)
 }
 
 // Lstat implements System.Lstat.
-func (s *ReadOnlySystem) Lstat(filename AbsPath) (os.FileInfo, error) {
+func (s *ReadOnlySystem) Lstat(filename AbsPath) (fs.FileInfo, error) {
 	return s.system.Lstat(filename)
 }
 
@@ -41,7 +46,7 @@ func (s *ReadOnlySystem) RawPath(path AbsPath) (AbsPath, error) {
 }
 
 // ReadDir implements System.ReadDir.
-func (s *ReadOnlySystem) ReadDir(name AbsPath) ([]os.DirEntry, error) {
+func (s *ReadOnlySystem) ReadDir(name AbsPath) ([]fs.DirEntry, error) {
 	return s.system.ReadDir(name)
 }
 
@@ -56,7 +61,7 @@ func (s *ReadOnlySystem) Readlink(name AbsPath) (string, error) {
 }
 
 // Stat implements System.Stat.
-func (s *ReadOnlySystem) Stat(name AbsPath) (os.FileInfo, error) {
+func (s *ReadOnlySystem) Stat(name AbsPath) (fs.FileInfo, error) {
 	return s.system.Stat(name)
 }
 
