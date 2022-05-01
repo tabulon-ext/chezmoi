@@ -153,7 +153,7 @@ jobs:
         restore-keys: |
           ${{ runner.os }}-go1.16.2-
     - name: Lint
-      uses: golangci/golangci-lint-action@v2
+      uses: golangci/golangci-lint-action@v3
       with:
         version: v1.38.0
     - name: ShellCheck
