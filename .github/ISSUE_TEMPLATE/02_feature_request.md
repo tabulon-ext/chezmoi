@@ -4,8 +4,16 @@ about: Request a new feature
 title: ''
 labels: enhancement
 assignees: ''
-
 ---
+
+<!--
+
+chezmoi has a strict zero-tolerance policy on LLM contributions. If you use an
+LLM (Large Language Model, like ChatGPT, Claude, Gemini, GitHub Copilot, or
+Llama) to make any kind of contribution then you will immediately be banned
+without recourse.
+
+-->
 
 ## Is your feature request related to a problem? Please describe.
 

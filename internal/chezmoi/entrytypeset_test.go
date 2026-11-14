@@ -3,8 +3,8 @@ package chezmoi
 import (
 	"testing"
 
-	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
+	"github.com/alecthomas/assert/v2"
+	"github.com/spf13/cobra"
 )
 
 func TestIncludeMaskSet(t *testing.T) {
@@ -31,7 +31,7 @@ func TestIncludeMaskSet(t *testing.T) {
 		},
 		{
 			s:        "all,noscripts",
-			expected: NewEntryTypeSet(EntryTypeDirs | EntryTypeFiles | EntryTypeRemove | EntryTypeSymlinks | EntryTypeEncrypted),
+			expected: NewEntryTypeSet(EntryTypesAll &^ EntryTypeScripts),
 		},
 		{
 			s:        "noscripts",
@@ -54,9 +54,9 @@ func TestIncludeMaskSet(t *testing.T) {
 			actual := NewEntryTypeSet(EntryTypesNone)
 			err := actual.Set(tc.s)
 			if tc.expectedErr {
-				require.Error(t, err)
+				assert.Error(t, err)
 			} else {
-				require.NoError(t, err)
+				assert.NoError(t, err)
 				assert.Equal(t, tc.expected, actual)
 			}
 		})
@@ -93,6 +93,14 @@ func TestIncludeMaskStringSlice(t *testing.T) {
 			expected: "symlinks",
 		},
 		{
+			bits:     EntryTypeEncrypted,
+			expected: "encrypted",
+		},
+		{
+			bits:     EntryTypeExternals,
+			expected: "externals",
+		},
+		{
 			bits:     EntryTypesNone,
 			expected: "none",
 		},
@@ -103,6 +111,48 @@ func TestIncludeMaskStringSlice(t *testing.T) {
 	} {
 		t.Run(tc.expected, func(t *testing.T) {
 			assert.Equal(t, tc.expected, NewEntryTypeSet(tc.bits).String())
+		})
+	}
+}
+
+func TestEntryTypeSetFlagCompletionFunc(t *testing.T) {
+	for _, tc := range []struct {
+		toComplete          string
+		expectedCompletions []string
+	}{
+		{
+			toComplete: "a",
+			expectedCompletions: []string{
+				"all",
+				"always",
+			},
+		},
+		{
+			toComplete: "e",
+			expectedCompletions: []string{
+				"encrypted",
+				"externals",
+			},
+		},
+		{
+			toComplete: "t",
+			expectedCompletions: []string{
+				"templates",
+			},
+		},
+		{
+			toComplete: "all,nos",
+			expectedCompletions: []string{
+				"all,noscripts",
+				"all,nosymlinks",
+			},
+		},
+	} {
+		t.Run(tc.toComplete, func(t *testing.T) {
+			completions, shellCompDirective := EntryTypeSetFlagCompletionFunc(nil, nil, tc.toComplete)
+			assert.Equal(t, tc.expectedCompletions, completions)
+			expectedShellCompDirective := cobra.ShellCompDirectiveNoSpace | cobra.ShellCompDirectiveNoFileComp
+			assert.Equal(t, expectedShellCompDirective, shellCompDirective)
 		})
 	}
 }

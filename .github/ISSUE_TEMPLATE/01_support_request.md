@@ -4,8 +4,16 @@ about: Get help with using chezmoi
 title: ''
 labels: support
 assignees: ''
-
 ---
+
+<!--
+
+chezmoi has a strict zero-tolerance policy on LLM contributions. If you use an
+LLM (Large Language Model, like ChatGPT, Claude, Gemini, GitHub Copilot, or
+Llama) to make any kind of contribution then you will immediately be banned
+without recourse.
+
+-->
 
 ## What exactly are you trying to do?
 
@@ -17,22 +25,25 @@ Describe what you have tried so far.
 
 ## Where else have you checked for solutions?
 
-* [ ] I have read [chezmoi's how-to guide](https://github.com/twpayne/chezmoi/blob/master/docs/HOWTO.md), and not found the answer.
-* [ ] I have read [chezmoi's FAQ](https://github.com/twpayne/chezmoi/blob/master/docs/FAQ.md), and not found the answer.
-* [ ] I have searched [chezmoi's reference guide](https://github.com/twpayne/chezmoi/blob/master/docs/REFERENCE.md), and not found the answer.
+* [ ] I have read [chezmoi's user guide](https://chezmoi.io/user-guide/command-overview/), and not found the answer.
+* [ ] I have searched [chezmoi's reference guide](https://chezmoi.io/reference/), and not found the answer.
 * [ ] Other, please give details.
 
-## Output of any commands you've tried with `--verbose`
+## Output of any commands you've tried with `--verbose` flag
 
-```
-$ chezmoi command --verbose
+```console
+$ chezmoi --verbose $COMMAND
 ```
 
 ## Output of `chezmoi doctor`
 
-```
+<details>
+
+```console
 $ chezmoi doctor
 ```
+
+</details>
 
 ## Additional context
 

@@ -1,8 +1,13 @@
 // Package templates contains chezmoi's templates.
 package templates
 
-import "embed"
+import _ "embed"
 
-// FS contains all templates.
-//go:embed *.tmpl
-var FS embed.FS
+//go:embed COMMIT_MESSAGE.tmpl
+var CommitMessageTmpl string
+
+//go:embed install.sh
+var InstallSh []byte
+
+//go:embed install-init-shell.sh.tmpl
+var InstallInitShellShTmpl []byte

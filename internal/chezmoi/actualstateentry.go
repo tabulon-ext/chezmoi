@@ -1,15 +1,20 @@
 package chezmoi
 
 import (
-	"os"
+	"crypto/sha256"
+	"errors"
+	"io/fs"
+	"sync"
 )
 
 // An ActualStateEntry represents the actual state of an entry in the
 // filesystem.
 type ActualStateEntry interface {
 	EntryState() (*EntryState, error)
+	IsExternal() bool
 	Path() AbsPath
 	Remove(system System) error
+	OriginString() string
 }
 
 // A ActualStateAbsent represents the absence of an entry in the filesystem.
@@ -20,160 +25,204 @@ type ActualStateAbsent struct {
 // A ActualStateDir represents the state of a directory in the filesystem.
 type ActualStateDir struct {
 	absPath AbsPath
-	perm    os.FileMode
+	perm    fs.FileMode
 }
 
 // A ActualStateFile represents the state of a file in the filesystem.
 type ActualStateFile struct {
-	absPath AbsPath
-	perm    os.FileMode
-	*lazyContents
+	contentsFunc ContentsFunc
+	absPath      AbsPath
+	perm         fs.FileMode
 }
 
 // A ActualStateSymlink represents the state of a symlink in the filesystem.
 type ActualStateSymlink struct {
-	absPath AbsPath
-	*lazyLinkname
+	linknameFunc func() (string, error)
+	absPath      AbsPath
 }
 
 // NewActualStateEntry returns a new ActualStateEntry populated with absPath
-// from fs.
-func NewActualStateEntry(system System, absPath AbsPath, info os.FileInfo, err error) (ActualStateEntry, error) {
-	if info == nil {
-		info, err = system.Lstat(absPath)
+// from system.
+func NewActualStateEntry(system System, absPath AbsPath, fileInfo fs.FileInfo, err error) (ActualStateEntry, error) {
+	if fileInfo == nil {
+		fileInfo, err = system.Lstat(absPath)
 	}
 	switch {
-	case os.IsNotExist(err):
+	case errors.Is(err, fs.ErrNotExist):
 		return &ActualStateAbsent{
 			absPath: absPath,
 		}, nil
 	case err != nil:
 		return nil, err
 	}
-	//nolint:exhaustive
-	switch info.Mode() & os.ModeType {
+	switch fileInfo.Mode().Type() {
 	case 0:
 		return &ActualStateFile{
 			absPath: absPath,
-			perm:    info.Mode() & os.ModePerm,
-			lazyContents: &lazyContents{
-				contentsFunc: func() ([]byte, error) {
-					return system.ReadFile(absPath)
-				},
-			},
+			perm:    fileInfo.Mode().Perm(),
+			contentsFunc: sync.OnceValues(func() ([]byte, error) {
+				return system.ReadFile(absPath)
+			}),
 		}, nil
-	case os.ModeDir:
+	case fs.ModeDir:
 		return &ActualStateDir{
 			absPath: absPath,
-			perm:    info.Mode() & os.ModePerm,
+			perm:    fileInfo.Mode().Perm(),
 		}, nil
-	case os.ModeSymlink:
+	case fs.ModeSymlink:
 		return &ActualStateSymlink{
 			absPath: absPath,
-			lazyLinkname: &lazyLinkname{
-				linknameFunc: func() (string, error) {
-					linkname, err := system.Readlink(absPath)
-					if err != nil {
-						return "", err
-					}
-					return linkname, nil
-				},
-			},
+			linknameFunc: sync.OnceValues(func() (string, error) {
+				linkname, err := system.Readlink(absPath)
+				if err != nil {
+					return "", err
+				}
+				return normalizeLinkname(linkname), nil
+			}),
 		}, nil
 	default:
-		return nil, &errUnsupportedFileType{
+		return nil, &UnsupportedFileTypeError{
 			absPath: absPath,
-			mode:    info.Mode(),
+			mode:    fileInfo.Mode(),
 		}
 	}
 }
 
-// EntryState returns d's entry state.
+// EntryState returns s's entry state.
 func (s *ActualStateAbsent) EntryState() (*EntryState, error) {
 	return &EntryState{
 		Type: EntryStateTypeRemove,
 	}, nil
 }
 
-// Path returns d's path.
+// IsExternal returns if s is an external.
+func (s *ActualStateAbsent) IsExternal() bool {
+	return false
+}
+
+// OriginString returns s's origin.
+func (s *ActualStateAbsent) OriginString() string {
+	return s.absPath.String()
+}
+
+// Path returns s's path.
 func (s *ActualStateAbsent) Path() AbsPath {
 	return s.absPath
 }
 
-// Remove removes d.
+// Remove removes s.
 func (s *ActualStateAbsent) Remove(system System) error {
 	return nil
 }
 
-// EntryState returns d's entry state.
+// EntryState returns s's entry state.
 func (s *ActualStateDir) EntryState() (*EntryState, error) {
 	return &EntryState{
 		Type: EntryStateTypeDir,
-		Mode: os.ModeDir | s.perm,
+		Mode: fs.ModeDir | s.perm,
 	}, nil
 }
 
-// Path returns d's path.
+// IsExternal returns if s is an external.
+func (s *ActualStateDir) IsExternal() bool {
+	return false
+}
+
+// OriginString returns s's origin.
+func (s *ActualStateDir) OriginString() string {
+	return s.absPath.String()
+}
+
+// Path returns s's path.
 func (s *ActualStateDir) Path() AbsPath {
 	return s.absPath
 }
 
-// Remove removes d.
+// Remove removes s.
 func (s *ActualStateDir) Remove(system System) error {
 	return system.RemoveAll(s.absPath)
 }
 
-// EntryState returns d's entry state.
+// Contents returns s's contents.
+func (s *ActualStateFile) Contents() ([]byte, error) {
+	return s.contentsFunc()
+}
+
+// EntryState returns s's entry state.
 func (s *ActualStateFile) EntryState() (*EntryState, error) {
 	contents, err := s.Contents()
 	if err != nil {
 		return nil, err
 	}
-	contentsSHA256, err := s.ContentsSHA256()
-	if err != nil {
-		return nil, err
-	}
+	contentsSHA256 := sha256.Sum256(contents)
 	return &EntryState{
 		Type:           EntryStateTypeFile,
 		Mode:           s.perm,
-		ContentsSHA256: HexBytes(contentsSHA256),
+		ContentsSHA256: HexBytes(contentsSHA256[:]),
 		contents:       contents,
 	}, nil
 }
 
-// Path returns d's path.
+// IsExternal returns if s is an external.
+func (s *ActualStateFile) IsExternal() bool {
+	return false
+}
+
+// OriginString returns s's origin.
+func (s *ActualStateFile) OriginString() string {
+	return s.absPath.String()
+}
+
+// Path returns s's path.
 func (s *ActualStateFile) Path() AbsPath {
 	return s.absPath
 }
 
-// Remove removes d.
+// Perm returns s's perm.
+func (s *ActualStateFile) Perm() fs.FileMode {
+	return s.perm
+}
+
+// Remove removes s.
 func (s *ActualStateFile) Remove(system System) error {
 	return system.RemoveAll(s.absPath)
 }
 
-// EntryState returns d's entry state.
+// EntryState returns s's entry state.
 func (s *ActualStateSymlink) EntryState() (*EntryState, error) {
 	linkname, err := s.Linkname()
 	if err != nil {
 		return nil, err
 	}
-	linknameSHA256, err := s.LinknameSHA256()
-	if err != nil {
-		return nil, err
-	}
+	linknameSHA256 := sha256.Sum256([]byte(linkname))
 	return &EntryState{
 		Type:           EntryStateTypeSymlink,
-		ContentsSHA256: HexBytes(linknameSHA256),
+		ContentsSHA256: HexBytes(linknameSHA256[:]),
 		contents:       []byte(linkname),
 	}, nil
 }
 
-// Path returns d's path.
+// IsExternal returns if s is an external.
+func (s *ActualStateSymlink) IsExternal() bool {
+	return false
+}
+
+// Linkname returns s's linkname.
+func (s *ActualStateSymlink) Linkname() (string, error) {
+	return s.linknameFunc()
+}
+
+// OriginString returns s's origin.
+func (s *ActualStateSymlink) OriginString() string {
+	return s.absPath.String()
+}
+
+// Path returns s's path.
 func (s *ActualStateSymlink) Path() AbsPath {
 	return s.absPath
 }
 
-// Remove removes d.
+// Remove removes s.
 func (s *ActualStateSymlink) Remove(system System) error {
 	return system.RemoveAll(s.absPath)
 }

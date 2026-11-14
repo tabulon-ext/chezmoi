@@ -1,10 +1,11 @@
 package chezmoi
 
 import (
-	"os"
+	"io/fs"
 	"os/exec"
+	"time"
 
-	vfs "github.com/twpayne/go-vfs/v2"
+	vfs "github.com/twpayne/go-vfs/v5"
 )
 
 // DryRunSystem is an System that reads from, but does not write to, to
@@ -22,8 +23,14 @@ func NewDryRunSystem(system System) *DryRunSystem {
 }
 
 // Chmod implements System.Chmod.
-func (s *DryRunSystem) Chmod(name AbsPath, mode os.FileMode) error {
-	s.modified = true
+func (s *DryRunSystem) Chmod(name AbsPath, mode fs.FileMode) error {
+	s.setModified()
+	return nil
+}
+
+// Chtimes implements System.Chtimes.
+func (s *DryRunSystem) Chtimes(name AbsPath, atime, mtime time.Time) error {
+	s.setModified()
 	return nil
 }
 
@@ -32,26 +39,27 @@ func (s *DryRunSystem) Glob(pattern string) ([]string, error) {
 	return s.system.Glob(pattern)
 }
 
-// IdempotentCmdOutput implements System.IdempotentCmdOutput.
-func (s *DryRunSystem) IdempotentCmdOutput(cmd *exec.Cmd) ([]byte, error) {
-	return s.system.IdempotentCmdOutput(cmd)
+// IsModified returns true if a method that would have modified the wrapped
+// system has been called.
+func (s *DryRunSystem) IsModified() bool {
+	return s.modified
+}
+
+// Link implements System.Link.
+func (s *DryRunSystem) Link(oldName, newName AbsPath) error {
+	s.setModified()
+	return nil
 }
 
 // Lstat implements System.Lstat.
-func (s *DryRunSystem) Lstat(name AbsPath) (os.FileInfo, error) {
+func (s *DryRunSystem) Lstat(name AbsPath) (fs.FileInfo, error) {
 	return s.system.Lstat(name)
 }
 
 // Mkdir implements System.Mkdir.
-func (s *DryRunSystem) Mkdir(name AbsPath, perm os.FileMode) error {
-	s.modified = true
+func (s *DryRunSystem) Mkdir(name AbsPath, perm fs.FileMode) error {
+	s.setModified()
 	return nil
-}
-
-// Modified returns true if a method that would have modified the wrapped system
-// has been called.
-func (s *DryRunSystem) Modified() bool {
-	return s.modified
 }
 
 // RawPath implements System.RawPath.
@@ -60,7 +68,7 @@ func (s *DryRunSystem) RawPath(path AbsPath) (AbsPath, error) {
 }
 
 // ReadDir implements System.ReadDir.
-func (s *DryRunSystem) ReadDir(name AbsPath) ([]os.DirEntry, error) {
+func (s *DryRunSystem) ReadDir(name AbsPath) ([]fs.DirEntry, error) {
 	return s.system.ReadDir(name)
 }
 
@@ -74,32 +82,38 @@ func (s *DryRunSystem) Readlink(name AbsPath) (string, error) {
 	return s.system.Readlink(name)
 }
 
+// Remove implements System.Remove.
+func (s *DryRunSystem) Remove(AbsPath) error {
+	s.setModified()
+	return nil
+}
+
 // RemoveAll implements System.RemoveAll.
 func (s *DryRunSystem) RemoveAll(AbsPath) error {
-	s.modified = true
+	s.setModified()
 	return nil
 }
 
 // Rename implements System.Rename.
-func (s *DryRunSystem) Rename(oldpath, newpath AbsPath) error {
-	s.modified = true
+func (s *DryRunSystem) Rename(oldPath, newPath AbsPath) error {
+	s.setModified()
 	return nil
 }
 
 // RunCmd implements System.RunCmd.
 func (s *DryRunSystem) RunCmd(cmd *exec.Cmd) error {
-	s.modified = true
+	s.setModified()
 	return nil
 }
 
 // RunScript implements System.RunScript.
-func (s *DryRunSystem) RunScript(scriptname RelPath, dir AbsPath, data []byte) error {
-	s.modified = true
+func (s *DryRunSystem) RunScript(scriptName RelPath, dir AbsPath, data []byte, options RunScriptOptions) error {
+	s.setModified()
 	return nil
 }
 
 // Stat implements System.Stat.
-func (s *DryRunSystem) Stat(name AbsPath) (os.FileInfo, error) {
+func (s *DryRunSystem) Stat(name AbsPath) (fs.FileInfo, error) {
 	return s.system.Stat(name)
 }
 
@@ -109,13 +123,20 @@ func (s *DryRunSystem) UnderlyingFS() vfs.FS {
 }
 
 // WriteFile implements System.WriteFile.
-func (s *DryRunSystem) WriteFile(AbsPath, []byte, os.FileMode) error {
-	s.modified = true
+func (s *DryRunSystem) WriteFile(AbsPath, []byte, fs.FileMode) error {
+	s.setModified()
 	return nil
 }
 
 // WriteSymlink implements System.WriteSymlink.
 func (s *DryRunSystem) WriteSymlink(string, AbsPath) error {
-	s.modified = true
+	s.setModified()
 	return nil
+}
+
+// setModified sets the modified flag to true. It is a separate function so that
+// it can act as a convenient breakpoint for detecting modifications to the
+// underlying system.
+func (s *DryRunSystem) setModified() {
+	s.modified = true
 }

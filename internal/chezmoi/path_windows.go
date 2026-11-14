@@ -5,21 +5,27 @@ import (
 	"strings"
 )
 
+var DevNullAbsPath = NewAbsPath("NUL:")
+
 // NewAbsPathFromExtPath returns a new AbsPath by converting extPath to use
 // slashes, performing tilde expansion, making the path absolute, and converting
 // the volume name to uppercase.
 func NewAbsPathFromExtPath(extPath string, homeDirAbsPath AbsPath) (AbsPath, error) {
-	slashTildePath := filepath.ToSlash(expandTilde(extPath, homeDirAbsPath))
-	if filepath.IsAbs(slashTildePath) {
-		return AbsPath(volumeNameToUpper(slashTildePath)), nil
+	extPath = filepath.Clean(extPath)
+	switch {
+	case extPath == "~":
+		return homeDirAbsPath, nil
+	case len(extPath) >= 2 && extPath[0] == '~' && isSlash(extPath[1]):
+		return homeDirAbsPath.JoinString(filepath.ToSlash(extPath[2:])), nil
+	case filepath.IsAbs(extPath):
+		return NewAbsPath(volumeNameToUpper(extPath)).ToSlash(), nil
+	default:
+		extPath, err := filepath.Abs(extPath)
+		if err != nil {
+			return EmptyAbsPath, err
+		}
+		return NewAbsPath(volumeNameToUpper(extPath)).ToSlash(), nil
 	}
-	tildeAbsPath, err := filepath.Abs(slashTildePath)
-	if err != nil {
-		return "", err
-	}
-	// filepath.Abs on Windows converts forward slashes to backslashes so we
-	// have to call filepath.ToSlash again.
-	return AbsPath(filepath.ToSlash(volumeNameToUpper(tildeAbsPath))), nil
 }
 
 // NormalizePath returns path normalized. On Windows, normalized paths are
@@ -28,24 +34,22 @@ func NormalizePath(path string) (AbsPath, error) {
 	var err error
 	path, err = filepath.Abs(path)
 	if err != nil {
-		return "", err
+		return EmptyAbsPath, err
 	}
 	if n := volumeNameLen(path); n > 0 {
 		path = strings.ToUpper(path[:n]) + path[n:]
 	}
-	return AbsPath(filepath.ToSlash(path)), nil
+	return NewAbsPath(path).ToSlash(), nil
 }
 
-// expandTilde expands a leading tilde in path.
-func expandTilde(path string, homeDirAbsPath AbsPath) string {
-	switch {
-	case path == "~":
-		return string(homeDirAbsPath)
-	case len(path) >= 2 && path[0] == '~' && isSlash(path[1]):
-		return string(homeDirAbsPath.Join(RelPath(path[2:])))
-	default:
-		return path
+// normalizeLinkname returns linkname normalized. On Windows, backslashes are
+// converted to forward slashes and if linkname is an absolute path then the
+// volume name is converted to uppercase.
+func normalizeLinkname(linkname string) string {
+	if filepath.IsAbs(linkname) {
+		return filepath.ToSlash(volumeNameToUpper(linkname))
 	}
+	return filepath.ToSlash(linkname)
 }
 
 // volumeNameLen returns length of the leading volume name on Windows. It
@@ -60,8 +64,7 @@ func volumeNameLen(path string) int {
 		return 2
 	}
 	// is it UNC? https://msdn.microsoft.com/en-us/library/windows/desktop/aa365247(v=vs.85).aspx
-	if l := len(path); l >= 5 && isSlash(path[0]) && isSlash(path[1]) &&
-		!isSlash(path[2]) && path[2] != '.' {
+	if l := len(path); l >= 5 && isSlash(path[0]) && isSlash(path[1]) && !isSlash(path[2]) && path[2] != '.' {
 		// first, leading `\\` and next shouldn't be `\`. its server name.
 		for n := 3; n < l-1; n++ {
 			// second, next '\' shouldn't be repeated.

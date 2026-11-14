@@ -10,8 +10,14 @@ func (NullPersistentState) Close() error { return nil }
 // CopyTo does nothing.
 func (NullPersistentState) CopyTo(s PersistentState) error { return nil }
 
+// Data does nothing.
+func (NullPersistentState) Data() (map[string]map[string]string, error) { return nil, nil }
+
 // Delete does nothing.
 func (NullPersistentState) Delete(bucket, key []byte) error { return nil }
+
+// DeleteBucket does nothing.
+func (NullPersistentState) DeleteBucket(bucket []byte) error { return nil }
 
 // ForEach does nothing.
 func (NullPersistentState) ForEach(bucket []byte, fn func(k, v []byte) error) error { return nil }

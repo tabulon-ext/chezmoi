@@ -1,13 +1,13 @@
 package chezmoi
 
 import (
-	"math/rand"
+	"errors"
+	"math/rand/v2"
 	"os"
-	"path/filepath"
+	"os/exec"
 	"testing"
 
-	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
+	"github.com/alecthomas/assert/v2"
 )
 
 type xorEncryption struct {
@@ -16,20 +16,26 @@ type xorEncryption struct {
 
 var _ Encryption = &xorEncryption{}
 
+func TestXOREncryption(t *testing.T) {
+	testEncryption(t, &xorEncryption{
+		key: byte(rand.N(255) + 1),
+	})
+}
+
 func (e *xorEncryption) Decrypt(ciphertext []byte) ([]byte, error) {
 	return e.xorWithKey(ciphertext), nil
 }
 
-func (e *xorEncryption) DecryptToFile(filename string, ciphertext []byte) error {
-	return os.WriteFile(filename, e.xorWithKey(ciphertext), 0o666)
+func (e *xorEncryption) DecryptToFile(plaintextAbsPath AbsPath, ciphertext []byte) error {
+	return os.WriteFile(plaintextAbsPath.String(), e.xorWithKey(ciphertext), 0o666)
 }
 
 func (e *xorEncryption) Encrypt(plaintext []byte) ([]byte, error) {
 	return e.xorWithKey(plaintext), nil
 }
 
-func (e *xorEncryption) EncryptFile(filename string) ([]byte, error) {
-	plaintext, err := os.ReadFile(filename)
+func (e *xorEncryption) EncryptFile(plaintextAbsPath AbsPath) ([]byte, error) {
+	plaintext, err := os.ReadFile(plaintextAbsPath.String())
 	if err != nil {
 		return nil, err
 	}
@@ -41,11 +47,21 @@ func (e *xorEncryption) EncryptedSuffix() string {
 }
 
 func (e *xorEncryption) xorWithKey(input []byte) []byte {
-	output := make([]byte, 0, len(input))
-	for _, b := range input {
-		output = append(output, b^e.key)
+	output := make([]byte, len(input))
+	for i, b := range input {
+		output[i] = b ^ e.key
 	}
 	return output
+}
+
+func lookPathOrSkip(t *testing.T, file string) string {
+	t.Helper()
+	command, err := LookPath(file)
+	if errors.Is(err, exec.ErrNotFound) {
+		t.Skipf("%s not found in $PATH", file)
+	}
+	assert.NoError(t, err)
+	return command
 }
 
 func testEncryptionDecryptToFile(t *testing.T, encryption Encryption) {
@@ -54,22 +70,17 @@ func testEncryptionDecryptToFile(t *testing.T, encryption Encryption) {
 		expectedPlaintext := []byte("plaintext\n")
 
 		actualCiphertext, err := encryption.Encrypt(expectedPlaintext)
-		require.NoError(t, err)
-		require.NotEmpty(t, actualCiphertext)
+		assert.NoError(t, err)
+		assert.NotZero(t, actualCiphertext)
 		assert.NotEqual(t, expectedPlaintext, actualCiphertext)
 
-		tempDir, err := os.MkdirTemp("", "chezmoi-test-encryption")
-		require.NoError(t, err)
-		defer func() {
-			assert.NoError(t, os.RemoveAll(tempDir))
-		}()
-		filename := filepath.Join(tempDir, "filename")
+		plaintextAbsPath := NewAbsPath(t.TempDir()).JoinString("plaintext")
 
-		require.NoError(t, encryption.DecryptToFile(filename, actualCiphertext))
+		assert.NoError(t, encryption.DecryptToFile(plaintextAbsPath, actualCiphertext))
 
-		actualPlaintext, err := os.ReadFile(filename)
-		require.NoError(t, err)
-		require.NotEmpty(t, actualPlaintext)
+		actualPlaintext, err := os.ReadFile(plaintextAbsPath.String())
+		assert.NoError(t, err)
+		assert.NotZero(t, actualPlaintext)
 		assert.Equal(t, expectedPlaintext, actualPlaintext)
 	})
 }
@@ -80,13 +91,13 @@ func testEncryptionEncryptDecrypt(t *testing.T, encryption Encryption) {
 		expectedPlaintext := []byte("plaintext\n")
 
 		actualCiphertext, err := encryption.Encrypt(expectedPlaintext)
-		require.NoError(t, err)
-		require.NotEmpty(t, actualCiphertext)
+		assert.NoError(t, err)
+		assert.NotZero(t, actualCiphertext)
 		assert.NotEqual(t, expectedPlaintext, actualCiphertext)
 
 		actualPlaintext, err := encryption.Decrypt(actualCiphertext)
-		require.NoError(t, err)
-		require.NotEmpty(t, actualPlaintext)
+		assert.NoError(t, err)
+		assert.NotZero(t, actualPlaintext)
 		assert.Equal(t, expectedPlaintext, actualPlaintext)
 	})
 }
@@ -96,31 +107,24 @@ func testEncryptionEncryptFile(t *testing.T, encryption Encryption) {
 	t.Run("EncryptFile", func(t *testing.T) {
 		expectedPlaintext := []byte("plaintext\n")
 
-		tempDir, err := os.MkdirTemp("", "chezmoi-test-encryption")
-		require.NoError(t, err)
-		defer func() {
-			assert.NoError(t, os.RemoveAll(tempDir))
-		}()
-		filename := filepath.Join(tempDir, "filename")
-		require.NoError(t, os.WriteFile(filename, expectedPlaintext, 0o666))
+		plaintextAbsPath := NewAbsPath(t.TempDir()).JoinString("plaintext")
+		assert.NoError(t, os.WriteFile(plaintextAbsPath.String(), expectedPlaintext, 0o666))
 
-		actualCiphertext, err := encryption.EncryptFile(filename)
-		require.NoError(t, err)
-		require.NotEmpty(t, actualCiphertext)
+		actualCiphertext, err := encryption.EncryptFile(plaintextAbsPath)
+		assert.NoError(t, err)
+		assert.NotZero(t, actualCiphertext)
 		assert.NotEqual(t, expectedPlaintext, actualCiphertext)
 
 		actualPlaintext, err := encryption.Decrypt(actualCiphertext)
-		require.NoError(t, err)
-		require.NotEmpty(t, actualPlaintext)
+		assert.NoError(t, err)
+		assert.NotZero(t, actualPlaintext)
 		assert.Equal(t, expectedPlaintext, actualPlaintext)
 	})
 }
 
-func TestXOREncryption(t *testing.T) {
-	xorEncryption := &xorEncryption{
-		key: byte(rand.Int() + 1),
-	}
-	testEncryptionDecryptToFile(t, xorEncryption)
-	testEncryptionEncryptDecrypt(t, xorEncryption)
-	testEncryptionEncryptFile(t, xorEncryption)
+func testEncryption(t *testing.T, encryption Encryption) {
+	t.Helper()
+	testEncryptionDecryptToFile(t, encryption)
+	testEncryptionEncryptDecrypt(t, encryption)
+	testEncryptionEncryptFile(t, encryption)
 }

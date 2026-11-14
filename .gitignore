@@ -1,7 +1,10 @@
-*.exe
-/bin/chezmoi
-/bin/gofumports
-/bin/golangci-lint
+/*.out
+/.vagrant
+/COMMIT
 /chezmoi
 /chezmoi.exe
 /dist
+/resource_windows_*.syso
+/versioninfo.json
+__pycache__/
+.DS_Store

@@ -1,8 +1,16 @@
 package chezmoi
 
 import (
-	"os"
+	"encoding/json"
+	"errors"
+	"io/fs"
+	"log/slog"
 	"strings"
+)
+
+var (
+	errEmptyDirName  = errors.New("empty directory name")
+	errEmptyFilename = errors.New("empty filename")
 )
 
 // A SourceFileTargetType is a the type of a target represented by a file in the
@@ -15,178 +23,282 @@ const (
 	SourceFileTypeCreate SourceFileTargetType = iota
 	SourceFileTypeFile
 	SourceFileTypeModify
+	SourceFileTypeRemove
 	SourceFileTypeScript
 	SourceFileTypeSymlink
 )
+
+var sourceFileTypeStrs = map[SourceFileTargetType]string{
+	SourceFileTypeCreate:  "create",
+	SourceFileTypeFile:    "file",
+	SourceFileTypeModify:  "modify",
+	SourceFileTypeRemove:  "remove",
+	SourceFileTypeScript:  "script",
+	SourceFileTypeSymlink: "symlink",
+}
+
+// A ScriptOrder defines when a script should be executed.
+type ScriptOrder int
+
+// Script orders.
+const (
+	ScriptOrderBefore ScriptOrder = -1
+	ScriptOrderDuring ScriptOrder = 0
+	ScriptOrderAfter  ScriptOrder = 1
+)
+
+// A ScriptCondition defines under what conditions a script should be executed.
+type ScriptCondition int
+
+// Script conditions.
+const (
+	ScriptConditionNone ScriptCondition = iota
+	ScriptConditionAlways
+	ScriptConditionOnce
+	ScriptConditionOnChange
+)
+
+var scriptConditionStrs = map[ScriptCondition]string{
+	ScriptConditionNone:     "",
+	ScriptConditionAlways:   "always",
+	ScriptConditionOnce:     "once",
+	ScriptConditionOnChange: "onchange",
+}
+
+func (c ScriptCondition) MarshalJSON() ([]byte, error) {
+	return json.Marshal(c.String())
+}
+
+func (c ScriptCondition) String() string {
+	return scriptConditionStrs[c]
+}
 
 // DirAttr holds attributes parsed from a source directory name.
 type DirAttr struct {
 	TargetName string
 	Exact      bool
+	External   bool
 	Private    bool
+	ReadOnly   bool
+	Remove     bool
 }
 
 // A FileAttr holds attributes parsed from a source file name.
 type FileAttr struct {
 	TargetName string
+	Condition  ScriptCondition
 	Type       SourceFileTargetType
+	Order      ScriptOrder
 	Empty      bool
 	Encrypted  bool
 	Executable bool
-	Once       bool
-	Order      int
 	Private    bool
+	ReadOnly   bool
 	Template   bool
 }
 
 // parseDirAttr parses a single directory name in the source state.
-func parseDirAttr(sourceName string) DirAttr {
-	var (
-		name    = sourceName
-		exact   = false
-		private = false
-	)
-	if strings.HasPrefix(name, exactPrefix) {
-		name = mustTrimPrefix(name, exactPrefix)
-		exact = true
+func parseDirAttr(name string) (DirAttr, error) {
+	if name == "" {
+		return DirAttr{}, errEmptyDirName
 	}
-	if strings.HasPrefix(name, privatePrefix) {
-		name = mustTrimPrefix(name, privatePrefix)
-		private = true
+	originalName := name
+	name, remove := strings.CutPrefix(name, removePrefix)
+	name, external := strings.CutPrefix(name, externalPrefix)
+	name, exact := strings.CutPrefix(name, exactPrefix)
+	name, private := strings.CutPrefix(name, privatePrefix)
+	name, readOnly := strings.CutPrefix(name, readOnlyPrefix)
+	var namePrefix string
+	switch {
+	case strings.HasPrefix(name, dotPrefix):
+		namePrefix = "."
+		name = name[len(dotPrefix):]
+	case strings.HasPrefix(name, literalPrefix):
+		name = name[len(literalPrefix):]
 	}
-	if strings.HasPrefix(name, dotPrefix) {
-		name = "." + mustTrimPrefix(name, dotPrefix)
+	if name == "" || namePrefix+name == ".." {
+		return DirAttr{}, InvalidPathError(originalName)
 	}
 	return DirAttr{
-		TargetName: name,
+		TargetName: namePrefix + name,
 		Exact:      exact,
+		External:   external,
 		Private:    private,
-	}
+		ReadOnly:   readOnly,
+		Remove:     remove,
+	}, nil
+}
+
+// LogValue implements log/slog.LogValuer.LogValue.
+func (da DirAttr) LogValue() slog.Value {
+	return slog.GroupValue(
+		slog.String("TargetName", da.TargetName),
+		slog.Bool("Exact", da.Exact),
+		slog.Bool("External", da.External),
+		slog.Bool("Private", da.Private),
+		slog.Bool("ReadOnly", da.ReadOnly),
+		slog.Bool("Remove", da.Remove),
+	)
 }
 
 // SourceName returns da's source name.
 func (da DirAttr) SourceName() string {
 	sourceName := ""
+	if da.Remove {
+		sourceName += removePrefix
+	}
+	if da.External {
+		sourceName += externalPrefix
+	}
 	if da.Exact {
 		sourceName += exactPrefix
 	}
 	if da.Private {
 		sourceName += privatePrefix
 	}
-	if strings.HasPrefix(da.TargetName, ".") {
-		sourceName += dotPrefix + mustTrimPrefix(da.TargetName, ".")
-	} else {
+	if da.ReadOnly {
+		sourceName += readOnlyPrefix
+	}
+	switch {
+	case strings.HasPrefix(da.TargetName, "."):
+		sourceName += dotPrefix + da.TargetName[len("."):]
+	case dirPrefixRegexpFunc().MatchString(da.TargetName):
+		sourceName += literalPrefix + da.TargetName
+	default:
 		sourceName += da.TargetName
 	}
 	return sourceName
 }
 
 // perm returns da's file mode.
-func (da DirAttr) perm() os.FileMode {
-	perm := os.FileMode(0o777)
+func (da DirAttr) perm() fs.FileMode {
+	perm := fs.ModePerm
 	if da.Private {
 		perm &^= 0o77
+	}
+	if da.ReadOnly {
+		perm &^= 0o222
 	}
 	return perm
 }
 
 // parseFileAttr parses a source file name in the source state.
-func parseFileAttr(sourceName, encryptedSuffix string) FileAttr {
+func parseFileAttr(name, encryptedSuffix string) (FileAttr, error) {
+	if name == "" {
+		return FileAttr{}, errEmptyFilename
+	}
+	originalName := name
 	var (
 		sourceFileType = SourceFileTypeFile
-		name           = sourceName
+		condition      = ScriptConditionNone
 		empty          = false
 		encrypted      = false
 		executable     = false
-		once           = false
+		order          = ScriptOrderDuring
 		private        = false
+		readOnly       = false
 		template       = false
-		order          = 0
 	)
 	switch {
 	case strings.HasPrefix(name, createPrefix):
 		sourceFileType = SourceFileTypeCreate
-		name = mustTrimPrefix(name, createPrefix)
-		if strings.HasPrefix(name, encryptedPrefix) {
-			name = mustTrimPrefix(name, encryptedPrefix)
-			encrypted = true
-		}
-		if strings.HasPrefix(name, privatePrefix) {
-			name = mustTrimPrefix(name, privatePrefix)
-			private = true
-		}
-		if strings.HasPrefix(name, executablePrefix) {
-			name = mustTrimPrefix(name, executablePrefix)
-			executable = true
-		}
+		name = name[len(createPrefix):]
+		name, encrypted = strings.CutPrefix(name, encryptedPrefix)
+		name, private = strings.CutPrefix(name, privatePrefix)
+		name, readOnly = strings.CutPrefix(name, readOnlyPrefix)
+		name, empty = strings.CutPrefix(name, emptyPrefix)
+		name, executable = strings.CutPrefix(name, executablePrefix)
+	case strings.HasPrefix(name, removePrefix):
+		sourceFileType = SourceFileTypeRemove
+		name = name[len(removePrefix):]
 	case strings.HasPrefix(name, runPrefix):
 		sourceFileType = SourceFileTypeScript
-		name = mustTrimPrefix(name, runPrefix)
-		if strings.HasPrefix(name, oncePrefix) {
-			name = mustTrimPrefix(name, oncePrefix)
-			once = true
+		name = name[len(runPrefix):]
+		switch {
+		case strings.HasPrefix(name, oncePrefix):
+			name = name[len(oncePrefix):]
+			condition = ScriptConditionOnce
+		case strings.HasPrefix(name, onChangePrefix):
+			name = name[len(onChangePrefix):]
+			condition = ScriptConditionOnChange
+		default:
+			condition = ScriptConditionAlways
 		}
 		switch {
 		case strings.HasPrefix(name, beforePrefix):
-			name = mustTrimPrefix(name, beforePrefix)
-			order = -1
+			name = name[len(beforePrefix):]
+			order = ScriptOrderBefore
 		case strings.HasPrefix(name, afterPrefix):
-			name = mustTrimPrefix(name, afterPrefix)
-			order = 1
+			name = name[len(afterPrefix):]
+			order = ScriptOrderAfter
 		}
 	case strings.HasPrefix(name, symlinkPrefix):
 		sourceFileType = SourceFileTypeSymlink
-		name = mustTrimPrefix(name, symlinkPrefix)
+		name = name[len(symlinkPrefix):]
 	case strings.HasPrefix(name, modifyPrefix):
 		sourceFileType = SourceFileTypeModify
-		name = mustTrimPrefix(name, modifyPrefix)
-		if strings.HasPrefix(name, privatePrefix) {
-			name = mustTrimPrefix(name, privatePrefix)
-			private = true
-		}
-		if strings.HasPrefix(name, executablePrefix) {
-			name = mustTrimPrefix(name, executablePrefix)
-			executable = true
-		}
+		name = name[len(modifyPrefix):]
+		name, encrypted = strings.CutPrefix(name, encryptedPrefix)
+		name, private = strings.CutPrefix(name, privatePrefix)
+		name, readOnly = strings.CutPrefix(name, readOnlyPrefix)
+		name, executable = strings.CutPrefix(name, executablePrefix)
 	default:
-		if strings.HasPrefix(name, encryptedPrefix) {
-			name = mustTrimPrefix(name, encryptedPrefix)
-			encrypted = true
-		}
-		if strings.HasPrefix(name, privatePrefix) {
-			name = mustTrimPrefix(name, privatePrefix)
-			private = true
-		}
-		if strings.HasPrefix(name, emptyPrefix) {
-			name = mustTrimPrefix(name, emptyPrefix)
-			empty = true
-		}
-		if strings.HasPrefix(name, executablePrefix) {
-			name = mustTrimPrefix(name, executablePrefix)
-			executable = true
-		}
+		name, encrypted = strings.CutPrefix(name, encryptedPrefix)
+		name, private = strings.CutPrefix(name, privatePrefix)
+		name, readOnly = strings.CutPrefix(name, readOnlyPrefix)
+		name, empty = strings.CutPrefix(name, emptyPrefix)
+		name, executable = strings.CutPrefix(name, executablePrefix)
 	}
-	if strings.HasPrefix(name, dotPrefix) {
-		name = "." + mustTrimPrefix(name, dotPrefix)
+	var namePrefix string
+	switch {
+	case strings.HasPrefix(name, dotPrefix):
+		namePrefix = "."
+		name = name[len(dotPrefix):]
+	case strings.HasPrefix(name, literalPrefix):
+		name = name[len(literalPrefix):]
 	}
 	if encrypted {
-		name = strings.TrimSuffix(name, encryptedSuffix)
+		name, _ = strings.CutSuffix(name, encryptedSuffix)
 	}
-	if strings.HasSuffix(name, TemplateSuffix) {
-		name = mustTrimSuffix(name, TemplateSuffix)
+	switch {
+	case strings.HasSuffix(name, literalSuffix):
+		name = name[:len(name)-len(literalSuffix)]
+	case strings.HasSuffix(name, TemplateSuffix):
+		name = name[:len(name)-len(TemplateSuffix)]
 		template = true
+		name, _ = strings.CutSuffix(name, literalSuffix)
+	}
+	if name == "" || name == "." || namePrefix+name == ".." {
+		return FileAttr{}, InvalidPathError(originalName)
 	}
 	return FileAttr{
-		TargetName: name,
+		TargetName: namePrefix + name,
 		Type:       sourceFileType,
+		Condition:  condition,
 		Empty:      empty,
 		Encrypted:  encrypted,
 		Executable: executable,
-		Once:       once,
-		Private:    private,
-		Template:   template,
 		Order:      order,
-	}
+		Private:    private,
+		ReadOnly:   readOnly,
+		Template:   template,
+	}, nil
+}
+
+// LogValue implements log/slog.LogValuer.LogValue.
+func (fa FileAttr) LogValue() slog.Value {
+	return slog.GroupValue(
+		slog.String("TargetName", fa.TargetName),
+		slog.String("Type", sourceFileTypeStrs[fa.Type]),
+		slog.String("Condition", fa.Condition.String()),
+		slog.Bool("Empty", fa.Empty),
+		slog.Bool("Encrypted", fa.Encrypted),
+		slog.Bool("Executable", fa.Executable),
+		slog.Int("Order", int(fa.Order)),
+		slog.Bool("Private", fa.Private),
+		slog.Bool("ReadOnly", fa.ReadOnly),
+		slog.Bool("Template", fa.Template),
+	)
 }
 
 // SourceName returns fa's source name.
@@ -201,6 +313,12 @@ func (fa FileAttr) SourceName(encryptedSuffix string) string {
 		if fa.Private {
 			sourceName += privatePrefix
 		}
+		if fa.ReadOnly {
+			sourceName += readOnlyPrefix
+		}
+		if fa.Empty {
+			sourceName += emptyPrefix
+		}
 		if fa.Executable {
 			sourceName += executablePrefix
 		}
@@ -211,6 +329,9 @@ func (fa FileAttr) SourceName(encryptedSuffix string) string {
 		if fa.Private {
 			sourceName += privatePrefix
 		}
+		if fa.ReadOnly {
+			sourceName += readOnlyPrefix
+		}
 		if fa.Empty {
 			sourceName += emptyPrefix
 		}
@@ -219,30 +340,47 @@ func (fa FileAttr) SourceName(encryptedSuffix string) string {
 		}
 	case SourceFileTypeModify:
 		sourceName = modifyPrefix
+		if fa.Encrypted {
+			sourceName += encryptedPrefix
+		}
 		if fa.Private {
 			sourceName += privatePrefix
+		}
+		if fa.ReadOnly {
+			sourceName += readOnlyPrefix
 		}
 		if fa.Executable {
 			sourceName += executablePrefix
 		}
+	case SourceFileTypeRemove:
+		sourceName = removePrefix
 	case SourceFileTypeScript:
 		sourceName = runPrefix
-		if fa.Once {
+		switch fa.Condition {
+		case ScriptConditionOnce:
 			sourceName += oncePrefix
+		case ScriptConditionOnChange:
+			sourceName += onChangePrefix
 		}
 		switch fa.Order {
-		case -1:
+		case ScriptOrderBefore:
 			sourceName += beforePrefix
-		case 1:
+		case ScriptOrderAfter:
 			sourceName += afterPrefix
 		}
 	case SourceFileTypeSymlink:
 		sourceName = symlinkPrefix
 	}
-	if strings.HasPrefix(fa.TargetName, ".") {
-		sourceName += dotPrefix + mustTrimPrefix(fa.TargetName, ".")
-	} else {
+	switch {
+	case strings.HasPrefix(fa.TargetName, "."):
+		sourceName += dotPrefix + fa.TargetName[len("."):]
+	case filePrefixRegexpFunc().MatchString(fa.TargetName):
+		sourceName += literalPrefix + fa.TargetName
+	default:
 		sourceName += fa.TargetName
+	}
+	if fileSuffixRegexpFunc().MatchString(fa.TargetName) {
+		sourceName += literalSuffix
 	}
 	if fa.Template {
 		sourceName += TemplateSuffix
@@ -254,13 +392,16 @@ func (fa FileAttr) SourceName(encryptedSuffix string) string {
 }
 
 // perm returns fa's permissions.
-func (fa FileAttr) perm() os.FileMode {
-	perm := os.FileMode(0o666)
+func (fa FileAttr) perm() fs.FileMode {
+	perm := fs.FileMode(0o666)
 	if fa.Executable {
 		perm |= 0o111
 	}
 	if fa.Private {
 		perm &^= 0o77
+	}
+	if fa.ReadOnly {
+		perm &^= 0o222
 	}
 	return perm
 }

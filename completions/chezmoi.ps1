@@ -10,7 +10,7 @@ filter __chezmoi_escapeStringWithSpecialChars {
     $_ -replace '\s|#|@|\$|;|,|''|\{|\}|\(|\)|"|`|\||<|>|&','`$&'
 }
 
-Register-ArgumentCompleter -CommandName 'chezmoi' -ScriptBlock {
+[scriptblock]${__chezmoiCompleterBlock} = {
     param(
             $WordToComplete,
             $CommandAst,
@@ -33,18 +33,20 @@ Register-ArgumentCompleter -CommandName 'chezmoi' -ScriptBlock {
     if ($Command.Length -gt $CursorPosition) {
         $Command=$Command.Substring(0,$CursorPosition)
     }
-	__chezmoi_debug "Truncated command: $Command"
+    __chezmoi_debug "Truncated command: $Command"
 
     $ShellCompDirectiveError=1
     $ShellCompDirectiveNoSpace=2
     $ShellCompDirectiveNoFileComp=4
     $ShellCompDirectiveFilterFileExt=8
     $ShellCompDirectiveFilterDirs=16
+    $ShellCompDirectiveKeepOrder=32
 
-	# Prepare the command to request completions for the program.
+    # Prepare the command to request completions for the program.
     # Split the command at the first space to separate the program and arguments.
     $Program,$Arguments = $Command.Split(" ",2)
-    $RequestComp="$Program __completeNoDesc $Arguments"
+
+    $RequestComp="$Program __complete $Arguments"
     __chezmoi_debug "RequestComp: $RequestComp"
 
     # we cannot use $WordToComplete because it
@@ -68,15 +70,26 @@ Register-ArgumentCompleter -CommandName 'chezmoi' -ScriptBlock {
         # If the last parameter is complete (there is a space following it)
         # We add an extra empty parameter so we can indicate this to the go method.
         __chezmoi_debug "Adding extra empty parameter"
-        # We need to use `"`" to pass an empty argument a "" or '' does not work!!!
-        $RequestComp="$RequestComp" + ' `"`"' 
+        # PowerShell 7.2+ changed the way how the arguments are passed to executables,
+        # so for pre-7.2 or when Legacy argument passing is enabled we need to use
+        # `"`" to pass an empty argument, a "" or '' does not work!!!
+        if ($PSVersionTable.PsVersion -lt [version]'7.2.0' -or
+            ($PSVersionTable.PsVersion -lt [version]'7.3.0' -and -not [ExperimentalFeature]::IsEnabled("PSNativeCommandArgumentPassing")) -or
+            (($PSVersionTable.PsVersion -ge [version]'7.3.0' -or [ExperimentalFeature]::IsEnabled("PSNativeCommandArgumentPassing")) -and
+              $PSNativeCommandArgumentPassing -eq 'Legacy')) {
+             $RequestComp="$RequestComp" + ' `"`"'
+        } else {
+             $RequestComp="$RequestComp" + ' ""'
+        }
     }
 
     __chezmoi_debug "Calling $RequestComp"
+    # First disable ActiveHelp which is not supported for Powershell
+    ${env:CHEZMOI_ACTIVE_HELP}=0
+
     #call the command store the output in $out and redirect stderr and stdout to null
     # $Out is an array contains each line per element
     Invoke-Expression -OutVariable out "$RequestComp" 2>&1 | Out-Null
-
 
     # get directive from last line
     [int]$Directive = $Out[-1].TrimStart(':')
@@ -97,7 +110,7 @@ Register-ArgumentCompleter -CommandName 'chezmoi' -ScriptBlock {
     }
 
     $Longest = 0
-    $Values = $Out | ForEach-Object {
+    [Array]$Values = $Out | ForEach-Object {
         #Split the output in name and description
         $Name, $Description = $_.Split("`t",2)
         __chezmoi_debug "Name: $Name Description: $Description"
@@ -112,7 +125,10 @@ Register-ArgumentCompleter -CommandName 'chezmoi' -ScriptBlock {
         if (-Not $Description) {
             $Description = " "
         }
-        @{Name="$Name";Description="$Description"}
+        New-Object -TypeName PSCustomObject -Property @{
+            Name = "$Name"
+            Description = "$Description"
+        }
     }
 
 
@@ -121,6 +137,30 @@ Register-ArgumentCompleter -CommandName 'chezmoi' -ScriptBlock {
         # remove the space here
         __chezmoi_debug "ShellCompDirectiveNoSpace is called"
         $Space = ""
+    }
+
+    if ((($Directive -band $ShellCompDirectiveFilterFileExt) -ne 0 ) -or
+       (($Directive -band $ShellCompDirectiveFilterDirs) -ne 0 ))  {
+        __chezmoi_debug "ShellCompDirectiveFilterFileExt ShellCompDirectiveFilterDirs are not supported"
+
+        # return here to prevent the completion of the extensions
+        return
+    }
+
+    $Values = $Values | Where-Object {
+        # filter the result
+        $_.Name -like "$WordToComplete*"
+
+        # Join the flag back if we have an equal sign flag
+        if ( $IsEqualFlag ) {
+            __chezmoi_debug "Join the equal sign flag back to the completion value"
+            $_.Name = $Flag + "=" + $_.Name
+        }
+    }
+
+    # we sort the values in ascending order by name if keep order isn't passed
+    if (($Directive -band $ShellCompDirectiveKeepOrder) -eq 0 ) {
+        $Values = $Values | Sort-Object -Property Name
     }
 
     if (($Directive -band $ShellCompDirectiveNoFileComp) -ne 0 ) {
@@ -136,32 +176,13 @@ Register-ArgumentCompleter -CommandName 'chezmoi' -ScriptBlock {
         }
     }
 
-    if ((($Directive -band $ShellCompDirectiveFilterFileExt) -ne 0 ) -or
-       (($Directive -band $ShellCompDirectiveFilterDirs) -ne 0 ))  {
-        __chezmoi_debug "ShellCompDirectiveFilterFileExt ShellCompDirectiveFilterDirs are not supported"
-
-        # return here to prevent the completion of the extensions
-        return
-    }
-
-    $Values = $Values | Where-Object {
-        # filter the result
-        $_.Name -like "$WordToComplete*"
-
-        # Join the flag back if we have a equal sign flag
-        if ( $IsEqualFlag ) {
-            __chezmoi_debug "Join the equal sign flag back to the completion value"
-            $_.Name = $Flag + "=" + $_.Name
-        }
-    }
-
     # Get the current mode
     $Mode = (Get-PSReadLineKeyHandler | Where-Object {$_.Key -eq "Tab" }).Function
     __chezmoi_debug "Mode: $Mode"
 
     $Values | ForEach-Object {
 
-        # store temporay because switch will overwrite $_
+        # store temporary because switch will overwrite $_
         $comp = $_
 
         # PowerShell supports three different completion modes
@@ -185,7 +206,12 @@ Register-ArgumentCompleter -CommandName 'chezmoi' -ScriptBlock {
                     __chezmoi_debug "Only one completion left"
 
                     # insert space after value
-                    [System.Management.Automation.CompletionResult]::new($($comp.Name | __chezmoi_escapeStringWithSpecialChars) + $Space, "$($comp.Name)", 'ParameterValue', "$($comp.Description)")
+                    $CompletionText = $($comp.Name | __chezmoi_escapeStringWithSpecialChars) + $Space
+                    if ($ExecutionContext.SessionState.LanguageMode -eq "FullLanguage"){
+                        [System.Management.Automation.CompletionResult]::new($CompletionText, "$($comp.Name)", 'ParameterValue', "$($comp.Description)")
+                    } else {
+                        $CompletionText
+                    }
 
                 } else {
                     # Add the proper number of spaces to align the descriptions
@@ -200,7 +226,12 @@ Register-ArgumentCompleter -CommandName 'chezmoi' -ScriptBlock {
                         $Description = "  ($($comp.Description))"
                     }
 
-                    [System.Management.Automation.CompletionResult]::new("$($comp.Name)$Description", "$($comp.Name)$Description", 'ParameterValue', "$($comp.Description)")
+                    $CompletionText = "$($comp.Name)$Description"
+                    if ($ExecutionContext.SessionState.LanguageMode -eq "FullLanguage"){
+                        [System.Management.Automation.CompletionResult]::new($CompletionText, "$($comp.Name)$Description", 'ParameterValue', "$($comp.Description)")
+                    } else {
+                        $CompletionText
+                    }
                 }
              }
 
@@ -209,17 +240,31 @@ Register-ArgumentCompleter -CommandName 'chezmoi' -ScriptBlock {
                 # insert space after value
                 # MenuComplete will automatically show the ToolTip of
                 # the highlighted value at the bottom of the suggestions.
-                [System.Management.Automation.CompletionResult]::new($($comp.Name | __chezmoi_escapeStringWithSpecialChars) + $Space, "$($comp.Name)", 'ParameterValue', "$($comp.Description)")
+
+                $CompletionText = $($comp.Name | __chezmoi_escapeStringWithSpecialChars) + $Space
+                if ($ExecutionContext.SessionState.LanguageMode -eq "FullLanguage"){
+                    [System.Management.Automation.CompletionResult]::new($CompletionText, "$($comp.Name)", 'ParameterValue', "$($comp.Description)")
+                } else {
+                    $CompletionText
+                }
             }
 
             # TabCompleteNext and in case we get something unknown
             Default {
                 # Like MenuComplete but we don't want to add a space here because
                 # the user need to press space anyway to get the completion.
-                # Description will not be shown because thats not possible with TabCompleteNext
-                [System.Management.Automation.CompletionResult]::new($($comp.Name | __chezmoi_escapeStringWithSpecialChars), "$($comp.Name)", 'ParameterValue', "$($comp.Description)")
+                # Description will not be shown because that's not possible with TabCompleteNext
+
+                $CompletionText = $($comp.Name | __chezmoi_escapeStringWithSpecialChars)
+                if ($ExecutionContext.SessionState.LanguageMode -eq "FullLanguage"){
+                    [System.Management.Automation.CompletionResult]::new($CompletionText, "$($comp.Name)", 'ParameterValue', "$($comp.Description)")
+                } else {
+                    $CompletionText
+                }
             }
         }
 
     }
 }
+
+Register-ArgumentCompleter -CommandName 'chezmoi' -ScriptBlock ${__chezmoiCompleterBlock}

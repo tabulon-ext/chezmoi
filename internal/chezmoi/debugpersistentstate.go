@@ -1,17 +1,22 @@
 package chezmoi
 
 import (
-	"github.com/rs/zerolog/log"
+	"log/slog"
+
+	"chezmoi.io/chezmoi/v2/internal/chezmoilog"
 )
 
 // A DebugPersistentState logs calls to a PersistentState.
 type DebugPersistentState struct {
+	logger          *slog.Logger
 	persistentState PersistentState
 }
 
-// NewDebugPersistentState returns a new debugPersistentState.
-func NewDebugPersistentState(persistentState PersistentState) *DebugPersistentState {
+// NewDebugPersistentState returns a new debugPersistentState that logs methods
+// on persistentState to logger.
+func NewDebugPersistentState(persistentState PersistentState, logger *slog.Logger) *DebugPersistentState {
 	return &DebugPersistentState{
+		logger:          logger,
 		persistentState: persistentState,
 	}
 }
@@ -19,29 +24,42 @@ func NewDebugPersistentState(persistentState PersistentState) *DebugPersistentSt
 // Close implements PersistentState.Close.
 func (s *DebugPersistentState) Close() error {
 	err := s.persistentState.Close()
-	log.Logger.Debug().
-		Err(err).
-		Msg("Close")
+	chezmoilog.InfoOrError(s.logger, "Close", err)
 	return err
 }
 
 // CopyTo implements PersistentState.CopyTo.
 func (s *DebugPersistentState) CopyTo(p PersistentState) error {
 	err := s.persistentState.CopyTo(p)
-	log.Logger.Debug().
-		Err(err).
-		Msg("CopyTo")
+	chezmoilog.InfoOrError(s.logger, "CopyTo", err)
 	return err
+}
+
+// Data implements PersistentState.Data.
+func (s *DebugPersistentState) Data() (map[string]map[string]string, error) {
+	data, err := s.persistentState.Data()
+	chezmoilog.InfoOrError(s.logger, "Data", err,
+		slog.Any("data", data),
+	)
+	return data, err
 }
 
 // Delete implements PersistentState.Delete.
 func (s *DebugPersistentState) Delete(bucket, key []byte) error {
 	err := s.persistentState.Delete(bucket, key)
-	log.Logger.Debug().
-		Bytes("bucket", bucket).
-		Bytes("key", key).
-		Err(err).
-		Msg("Delete")
+	chezmoilog.InfoOrError(s.logger, "Delete", err,
+		chezmoilog.Bytes("bucket", bucket),
+		chezmoilog.Bytes("key", key),
+	)
+	return err
+}
+
+// DeleteBucket implements PersistentState.DeleteBucket.
+func (s *DebugPersistentState) DeleteBucket(bucket []byte) error {
+	err := s.persistentState.DeleteBucket(bucket)
+	chezmoilog.InfoOrError(s.logger, "DeleteBucket", err,
+		chezmoilog.Bytes("bucket", bucket),
+	)
 	return err
 }
 
@@ -49,40 +67,37 @@ func (s *DebugPersistentState) Delete(bucket, key []byte) error {
 func (s *DebugPersistentState) ForEach(bucket []byte, fn func(k, v []byte) error) error {
 	err := s.persistentState.ForEach(bucket, func(k, v []byte) error {
 		err := fn(k, v)
-		log.Logger.Debug().
-			Bytes("bucket", bucket).
-			Bytes("key", k).
-			Bytes("value", v).
-			Err(err).
-			Msg("ForEach")
+		chezmoilog.InfoOrError(s.logger, "ForEach", err,
+			chezmoilog.Bytes("bucket", bucket),
+			chezmoilog.Bytes("key", k),
+			chezmoilog.Bytes("value", v),
+		)
 		return err
 	})
-	log.Logger.Debug().
-		Bytes("bucket", bucket).
-		Err(err)
+	chezmoilog.InfoOrError(s.logger, "ForEach", err,
+		chezmoilog.Bytes("bucket", bucket),
+	)
 	return err
 }
 
 // Get implements PersistentState.Get.
 func (s *DebugPersistentState) Get(bucket, key []byte) ([]byte, error) {
 	value, err := s.persistentState.Get(bucket, key)
-	log.Logger.Debug().
-		Bytes("bucket", bucket).
-		Bytes("key", key).
-		Bytes("value", value).
-		Err(err).
-		Msg("Get")
+	chezmoilog.InfoOrError(s.logger, "Get", err,
+		chezmoilog.Bytes("bucket", bucket),
+		chezmoilog.Bytes("key", key),
+		chezmoilog.Bytes("value", value),
+	)
 	return value, err
 }
 
 // Set implements PersistentState.Set.
 func (s *DebugPersistentState) Set(bucket, key, value []byte) error {
 	err := s.persistentState.Set(bucket, key, value)
-	log.Logger.Debug().
-		Bytes("bucket", bucket).
-		Bytes("key", key).
-		Bytes("value", value).
-		Err(err).
-		Msg("Set")
+	chezmoilog.InfoOrError(s.logger, "Set", err,
+		chezmoilog.Bytes("bucket", bucket),
+		chezmoilog.Bytes("key", key),
+		chezmoilog.Bytes("value", value),
+	)
 	return err
 }

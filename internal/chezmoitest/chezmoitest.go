@@ -2,76 +2,41 @@
 package chezmoitest
 
 import (
-	"fmt"
+	"io/fs"
+	"log/slog"
 	"os"
 	"os/exec"
-	"path/filepath"
-	"regexp"
 	"runtime"
+	"strconv"
 	"strings"
 	"testing"
 
-	"github.com/rs/zerolog/log"
-	"github.com/stretchr/testify/require"
-	"github.com/twpayne/go-vfs/v2"
-	"github.com/twpayne/go-vfs/v2/vfst"
+	"filippo.io/age"
+	"github.com/alecthomas/assert/v2"
+	"github.com/google/renameio/v2/maybe"
+	"github.com/twpayne/go-vfs/v5"
+	"github.com/twpayne/go-vfs/v5/vfst"
 
-	"github.com/twpayne/chezmoi/internal/chezmoilog"
+	"chezmoi.io/chezmoi/v2/internal/chezmoilog"
 )
 
-var (
-	agePublicKeyRx                    = regexp.MustCompile(`(?m)^Public key: ([0-9a-z]+)\s*$`)
-	gpgKeyMarkedAsUltimatelyTrustedRx = regexp.MustCompile(`(?m)^gpg: key ([0-9A-F]+) marked as ultimately trusted\s*$`)
-)
-
-// AGEGenerateKey generates and returns an age public key and the path to the
-// private key. If filename is non-zero then the private key is written to it,
-// otherwise a new file is created in a temporary directory and the caller is
-// responsible for removing the temporary directory.
-func AGEGenerateKey(filename string) (publicKey, privateKeyFile string, err error) {
-	if filename == "" {
-		var tempDir string
-		tempDir, err = os.MkdirTemp("", "chezmoi-test-age-key")
-		if err != nil {
-			return "", "", err
-		}
-		defer func() {
-			if err != nil {
-				os.RemoveAll(tempDir)
-			}
-		}()
-		if runtime.GOOS != "windows" {
-			if err = os.Chmod(tempDir, 0o700); err != nil {
-				return
-			}
-		}
-		filename = filepath.Join(tempDir, "key.txt")
-	}
-
-	privateKeyFile = filename
-	var output []byte
-	cmd := exec.Command("age-keygen", "--output", privateKeyFile)
-	output, err = chezmoilog.LogCmdCombinedOutput(log.Logger, cmd)
+// AgeGenerateKey generates an identity in identityFile and returns the
+// recipient.
+func AgeGenerateKey(command, identityFile string) (*age.X25519Recipient, error) {
+	identity, err := age.GenerateX25519Identity()
 	if err != nil {
-		return
+		return nil, err
 	}
-	match := agePublicKeyRx.FindSubmatch(output)
-	if match == nil {
-		err = fmt.Errorf("public key not found in %q", output)
-		return
+	if err := maybe.WriteFile(identityFile, []byte(identity.String()), 0o600); err != nil {
+		return nil, err
 	}
-	publicKey = string(match[1])
-	return
+	return identity.Recipient(), nil
 }
 
-// GPGCommand returns the GPG command, if it can be found.
-func GPGCommand() (string, error) {
-	return exec.LookPath("gpg")
-}
-
-// GPGGenerateKey generates and returns a GPG key in homeDir.
+// GPGGenerateKey generates GPG key in homeDir and returns the key and the
+// passphrase.
 func GPGGenerateKey(command, homeDir string) (key, passphrase string, err error) {
-	//nolint:gosec
+	key = "chezmoi-test-gpg-key"
 	passphrase = "chezmoi-test-gpg-passphrase"
 	cmd := exec.Command(
 		command,
@@ -80,17 +45,12 @@ func GPGGenerateKey(command, homeDir string) (key, passphrase string, err error)
 		"--no-tty",
 		"--passphrase", passphrase,
 		"--pinentry-mode", "loopback",
-		"--quick-generate-key", "chezmoi-test-gpg-key",
+		"--quick-generate-key", key,
 	)
-	output, err := chezmoilog.LogCmdCombinedOutput(log.Logger, cmd)
-	if err != nil {
-		return "", "", err
-	}
-	submatch := gpgKeyMarkedAsUltimatelyTrustedRx.FindSubmatch(output)
-	if submatch == nil {
-		return "", "", fmt.Errorf("key not found in %q", output)
-	}
-	return string(submatch[1]), passphrase, nil
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	err = chezmoilog.LogCmdRun(slog.Default(), cmd)
+	return key, passphrase, err
 }
 
 // HomeDir returns the home directory.
@@ -105,10 +65,13 @@ func HomeDir() string {
 
 // JoinLines joins lines with newlines.
 func JoinLines(lines ...string) string {
+	if len(lines) == 0 {
+		return ""
+	}
 	return strings.Join(lines, "\n") + "\n"
 }
 
-// SkipUnlessGOOS calls t.Skip() if name does not match runtime.GOOS.
+// SkipUnlessGOOS calls t.Skip() if name does not match [runtime.GOOS].
 func SkipUnlessGOOS(t *testing.T, name string) {
 	t.Helper()
 	switch {
@@ -120,10 +83,19 @@ func SkipUnlessGOOS(t *testing.T, name string) {
 }
 
 // WithTestFS calls f with a test filesystem populated with root.
-func WithTestFS(t *testing.T, root interface{}, f func(fs vfs.FS)) {
+func WithTestFS(t *testing.T, root any, f func(vfs.FS)) {
 	t.Helper()
-	fs, cleanup, err := vfst.NewTestFS(root)
-	require.NoError(t, err)
+	fileSystem, cleanup, err := vfst.NewTestFS(root, vfst.BuilderUmask(Umask))
+	assert.NoError(t, err)
 	t.Cleanup(cleanup)
-	f(fs)
+	f(fileSystem)
+}
+
+// mustParseFileMode parses s as a [fs.FileMode] and panics on any error.
+func mustParseFileMode(s string) fs.FileMode {
+	u, err := strconv.ParseUint(s, 0, 32)
+	if err != nil {
+		panic(err)
+	}
+	return fs.FileMode(uint32(u))
 }

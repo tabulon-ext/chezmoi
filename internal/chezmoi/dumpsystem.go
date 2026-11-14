@@ -1,95 +1,116 @@
 package chezmoi
 
 import (
-	"os"
+	"io/fs"
+	"os/exec"
 
-	vfs "github.com/twpayne/go-vfs/v2"
+	vfs "github.com/twpayne/go-vfs/v5"
 )
 
-// A dataType is a data type.
-type dataType string
+// A DumpSystemDataType is a data type in a dump system.
+type DumpSystemDataType string
 
-// dataTypes.
+// Dump system data types.
 const (
-	dataTypeDir     dataType = "dir"
-	dataTypeFile    dataType = "file"
-	dataTypeScript  dataType = "script"
-	dataTypeSymlink dataType = "symlink"
+	DumpSystemDataTypeCommand DumpSystemDataType = "command"
+	DumpSystemDataTypeDir     DumpSystemDataType = "dir"
+	DumpSystemDataTypeFile    DumpSystemDataType = "file"
+	DumpSystemDataTypeScript  DumpSystemDataType = "script"
+	DumpSystemDataTypeSymlink DumpSystemDataType = "symlink"
 )
 
 // A DumpSystem is a System that writes to a data file.
 type DumpSystem struct {
 	emptySystemMixin
 	noUpdateSystemMixin
-	data map[AbsPath]interface{}
+
+	data map[string]any
 }
 
-// A dirData contains data about a directory.
-type dirData struct {
-	Type dataType    `json:"type" toml:"type" yaml:"type"`
-	Name AbsPath     `json:"name" toml:"name" yaml:"name"`
-	Perm os.FileMode `json:"perm" toml:"perm" yaml:"perm"`
+// A DumpSystemCommandData contains data about a command.
+type DumpSystemCommandData struct {
+	Type DumpSystemDataType `json:"type" yaml:"type"`
+	Path string             `json:"path" yaml:"path"`
+	Args []string           `json:"args" yaml:"args"`
 }
 
-// A fileData contains data about a file.
-type fileData struct {
-	Type     dataType    `json:"type" toml:"type" yaml:"type"`
-	Name     AbsPath     `json:"name" toml:"name" yaml:"name"`
-	Contents string      `json:"contents" toml:"contents" yaml:"contents"`
-	Perm     os.FileMode `json:"perm" toml:"perm" yaml:"perm"`
+// A DumpSystemDirData contains data about a directory.
+type DumpSystemDirData struct {
+	Type DumpSystemDataType `json:"type" yaml:"type"`
+	Name AbsPath            `json:"name" yaml:"name"`
+	Perm fs.FileMode        `json:"perm" yaml:"perm"`
 }
 
-// A scriptData contains data about a script.
-type scriptData struct {
-	Type     dataType `json:"type" toml:"type" yaml:"type"`
-	Name     AbsPath  `json:"name" toml:"name" yaml:"name"`
-	Contents string   `json:"contents" toml:"contents" yaml:"contents"`
+// A DumpSystemFileData contains data about a file.
+type DumpSystemFileData struct {
+	Type     DumpSystemDataType `json:"type"     yaml:"type"`
+	Name     AbsPath            `json:"name"     yaml:"name"`
+	Contents string             `json:"contents" yaml:"contents"`
+	Perm     fs.FileMode        `json:"perm"     yaml:"perm"`
 }
 
-// A symlinkData contains data about a symlink.
-type symlinkData struct {
-	Type     dataType `json:"type" toml:"type" yaml:"type"`
-	Name     AbsPath  `json:"name" toml:"name" yaml:"name"`
-	Linkname string   `json:"linkname" toml:"linkname" yaml:"linkname"`
+// A DumpSystemScriptData contains data about a script.
+type DumpSystemScriptData struct {
+	Type        DumpSystemDataType `json:"type"                  yaml:"type"`
+	Name        AbsPath            `json:"name"                  yaml:"name"`
+	Contents    string             `json:"contents"              yaml:"contents"`
+	Condition   ScriptCondition    `json:"condition"             yaml:"condition"`
+	Interpreter *Interpreter       `json:"interpreter,omitempty" yaml:"interpreter,omitempty"`
+}
+
+// A DumpSystemSymlinkData contains data about a symlink.
+type DumpSystemSymlinkData struct {
+	Type     DumpSystemDataType `json:"type"     yaml:"type"`
+	Name     AbsPath            `json:"name"     yaml:"name"`
+	Linkname string             `json:"linkname" yaml:"linkname"`
 }
 
 // NewDumpSystem returns a new DumpSystem that accumulates data.
 func NewDumpSystem() *DumpSystem {
 	return &DumpSystem{
-		data: make(map[AbsPath]interface{}),
+		data: make(map[string]any),
 	}
 }
 
 // Data returns s's data.
-func (s *DumpSystem) Data() interface{} {
+func (s *DumpSystem) Data() map[string]any {
 	return s.data
 }
 
 // Mkdir implements System.Mkdir.
-func (s *DumpSystem) Mkdir(dirname AbsPath, perm os.FileMode) error {
-	if _, exists := s.data[dirname]; exists {
-		return os.ErrExist
-	}
-	s.data[dirname] = &dirData{
-		Type: dataTypeDir,
+func (s *DumpSystem) Mkdir(dirname AbsPath, perm fs.FileMode) error {
+	return s.setData(dirname.String(), &DumpSystemDirData{
+		Type: DumpSystemDataTypeDir,
 		Name: dirname,
 		Perm: perm,
+	})
+}
+
+// RunCmd implements System.RunCmd.
+func (s *DumpSystem) RunCmd(cmd *exec.Cmd) error {
+	if cmd.Dir == "" {
+		return nil
 	}
-	return nil
+	return s.setData(cmd.Dir, &DumpSystemCommandData{
+		Type: DumpSystemDataTypeCommand,
+		Path: cmd.Path,
+		Args: cmd.Args,
+	})
 }
 
 // RunScript implements System.RunScript.
-func (s *DumpSystem) RunScript(scriptname RelPath, dir AbsPath, data []byte) error {
-	scriptnameAbsPath := AbsPath(scriptname)
-	if _, exists := s.data[scriptnameAbsPath]; exists {
-		return os.ErrExist
+func (s *DumpSystem) RunScript(scriptName RelPath, dir AbsPath, data []byte, options RunScriptOptions) error {
+	scriptNameStr := scriptName.String()
+	scriptData := &DumpSystemScriptData{
+		Type:      DumpSystemDataTypeScript,
+		Name:      NewAbsPath(scriptNameStr),
+		Contents:  string(data),
+		Condition: options.Condition,
 	}
-	s.data[scriptnameAbsPath] = &scriptData{
-		Type:     dataTypeScript,
-		Name:     scriptnameAbsPath,
-		Contents: string(data),
+	if !options.Interpreter.None() {
+		scriptData.Interpreter = options.Interpreter
 	}
-	return nil
+	return s.setData(scriptNameStr, scriptData)
 }
 
 // UnderlyingFS implements System.UnderlyingFS.
@@ -98,28 +119,28 @@ func (s *DumpSystem) UnderlyingFS() vfs.FS {
 }
 
 // WriteFile implements System.WriteFile.
-func (s *DumpSystem) WriteFile(filename AbsPath, data []byte, perm os.FileMode) error {
-	if _, exists := s.data[filename]; exists {
-		return os.ErrExist
-	}
-	s.data[filename] = &fileData{
-		Type:     dataTypeFile,
+func (s *DumpSystem) WriteFile(filename AbsPath, data []byte, perm fs.FileMode) error {
+	return s.setData(filename.String(), &DumpSystemFileData{
+		Type:     DumpSystemDataTypeFile,
 		Name:     filename,
 		Contents: string(data),
 		Perm:     perm,
-	}
-	return nil
+	})
 }
 
 // WriteSymlink implements System.WriteSymlink.
-func (s *DumpSystem) WriteSymlink(oldname string, newname AbsPath) error {
-	if _, exists := s.data[newname]; exists {
-		return os.ErrExist
+func (s *DumpSystem) WriteSymlink(oldName string, newName AbsPath) error {
+	return s.setData(newName.String(), &DumpSystemSymlinkData{
+		Type:     DumpSystemDataTypeSymlink,
+		Name:     newName,
+		Linkname: oldName,
+	})
+}
+
+func (s *DumpSystem) setData(key string, value any) error {
+	if _, ok := s.data[key]; ok {
+		return fs.ErrExist
 	}
-	s.data[newname] = &symlinkData{
-		Type:     dataTypeSymlink,
-		Name:     newname,
-		Linkname: oldname,
-	}
+	s.data[key] = value
 	return nil
 }

@@ -1,11 +1,15 @@
 package chezmoi
 
-// FIXME Add IncludeEncrypted
-
 import (
 	"fmt"
-	"os"
+	"io/fs"
+	"maps"
+	"reflect"
+	"slices"
 	"strings"
+
+	"github.com/go-viper/mapstructure/v2"
+	"github.com/spf13/cobra"
 )
 
 // An EntryTypeSet is a set of entry types. It parses and prints as a
@@ -26,24 +30,65 @@ const (
 	EntryTypeScripts
 	EntryTypeSymlinks
 	EntryTypeEncrypted
+	EntryTypeExternals
+	EntryTypeTemplates
+	EntryTypeAlways
 
 	// EntryTypesAll is all entry types.
-	EntryTypesAll EntryTypeBits = EntryTypeDirs | EntryTypeFiles | EntryTypeRemove | EntryTypeScripts | EntryTypeSymlinks | EntryTypeEncrypted
+	EntryTypesAll EntryTypeBits = EntryTypeDirs |
+		EntryTypeFiles |
+		EntryTypeRemove |
+		EntryTypeScripts |
+		EntryTypeSymlinks |
+		EntryTypeEncrypted |
+		EntryTypeExternals |
+		EntryTypeTemplates |
+		EntryTypeAlways
 
 	// EntryTypesNone is no entry types.
 	EntryTypesNone EntryTypeBits = 0
 )
 
-// entryTypeBits is a map from human-readable strings to EntryTypeBits.
-var entryTypeBits = map[string]EntryTypeBits{
-	"all":       EntryTypesAll,
-	"dirs":      EntryTypeDirs,
-	"files":     EntryTypeFiles,
-	"remove":    EntryTypeRemove,
-	"scripts":   EntryTypeScripts,
-	"symlinks":  EntryTypeSymlinks,
-	"encrypted": EntryTypeEncrypted,
-}
+var (
+	// entryTypeBits is a map from human-readable strings to EntryTypeBits.
+	entryTypeBits = map[string]EntryTypeBits{
+		"all":       EntryTypesAll,
+		"always":    EntryTypeAlways,
+		"dirs":      EntryTypeDirs,
+		"files":     EntryTypeFiles,
+		"remove":    EntryTypeRemove,
+		"scripts":   EntryTypeScripts,
+		"symlinks":  EntryTypeSymlinks,
+		"encrypted": EntryTypeEncrypted,
+		"externals": EntryTypeExternals,
+		"templates": EntryTypeTemplates,
+	}
+
+	entryTypeStrings = slices.Sorted(maps.Keys(entryTypeBits))
+
+	entryTypeCompletions = []string{
+		"all",
+		"always",
+		"dirs",
+		"encrypted",
+		"externals",
+		"files",
+		"noalways",
+		"nodirs",
+		"noencrypted",
+		"noexternals",
+		"nofiles",
+		"none",
+		"noremove",
+		"noscripts",
+		"nosymlinks",
+		"notemplates",
+		"remove",
+		"scripts",
+		"symlinks",
+		"templates",
+	}
+)
 
 // NewEntryTypeSet returns a new IncludeSet.
 func NewEntryTypeSet(bits EntryTypeBits) *EntryTypeSet {
@@ -52,59 +97,189 @@ func NewEntryTypeSet(bits EntryTypeBits) *EntryTypeSet {
 	}
 }
 
-// IncludeActualStateEntry returns true if the type of actualStateEntry is a member.
-func (s *EntryTypeSet) IncludeActualStateEntry(actualStateEntry ActualStateEntry) bool {
-	switch actualStateEntry.(type) {
-	case *ActualStateAbsent:
-		return s.bits&EntryTypeRemove != 0
-	case *ActualStateDir:
-		return s.bits&EntryTypeDirs != 0
-	case *ActualStateFile:
-		return s.bits&EntryTypeFiles != 0
-	case *ActualStateSymlink:
-		return s.bits&EntryTypeSymlinks != 0
-	default:
-		return false
-	}
+// Bits returns s's bits.
+func (s *EntryTypeSet) Bits() EntryTypeBits {
+	return s.bits
 }
 
-// IncludeEncrypted returns true if s includes encrypted files.
-func (s *EntryTypeSet) IncludeEncrypted() bool {
-	return s.bits&EntryTypeEncrypted != 0
+// ContainsEntryTypeBits returns if s includes b.
+func (s *EntryTypeSet) ContainsEntryTypeBits(b EntryTypeBits) bool {
+	return s.bits&b != 0
 }
 
-// IncludeFileInfo returns true if the type of info is a member.
-func (s *EntryTypeSet) IncludeFileInfo(info os.FileInfo) bool {
+// ContainsFileInfo returns true if fileInfo is a member.
+func (s *EntryTypeSet) ContainsFileInfo(fileInfo fs.FileInfo) bool {
 	switch {
-	case info.IsDir():
+	case fileInfo.IsDir():
 		return s.bits&EntryTypeDirs != 0
-	case info.Mode().IsRegular():
+	case fileInfo.Mode().IsRegular():
 		return s.bits&EntryTypeFiles != 0
-	case info.Mode()&os.ModeType == os.ModeSymlink:
+	case fileInfo.Mode().Type() == fs.ModeSymlink:
 		return s.bits&EntryTypeSymlinks != 0
 	default:
 		return false
 	}
 }
 
-// IncludeTargetStateEntry returns true if type of targetStateEntry is a member.
-func (s *EntryTypeSet) IncludeTargetStateEntry(targetStateEntry TargetStateEntry) bool {
+// ContainsSourceStateEntry returns true if sourceStateEntry is a member.
+func (s *EntryTypeSet) ContainsSourceStateEntry(sourceStateEntry SourceStateEntry) bool {
+	isExternal := sourceStateEntry.Origin().IsExternal()
+	switch sourceStateEntry := sourceStateEntry.(type) {
+	case *SourceStateCommand:
+		switch {
+		case s.bits&EntryTypeExternals != 0 && isExternal:
+			return true
+		case s.bits&EntryTypeDirs != 0:
+			return true
+		default:
+			return false
+		}
+	case *SourceStateDir, *SourceStateImplicitDir:
+		switch {
+		case s.bits&EntryTypeExternals != 0 && isExternal:
+			return true
+		case s.bits&EntryTypeDirs != 0:
+			return true
+		default:
+			return false
+		}
+	case *SourceStateFile:
+		switch sourceAttr := sourceStateEntry.Attr(); {
+		case s.bits&EntryTypeExternals != 0 && isExternal:
+			return true
+		case s.bits&EntryTypeEncrypted != 0 && sourceAttr.Encrypted:
+			return true
+		case s.bits&EntryTypeTemplates != 0 && sourceAttr.Template:
+			return true
+		case s.bits&EntryTypeFiles != 0 && sourceAttr.Type == SourceFileTypeCreate:
+			return true
+		case s.bits&EntryTypeFiles != 0 && sourceAttr.Type == SourceFileTypeFile:
+			return true
+		case s.bits&EntryTypeFiles != 0 && sourceAttr.Type == SourceFileTypeModify:
+			return true
+		case s.bits&EntryTypeRemove != 0 && sourceAttr.Type == SourceFileTypeRemove:
+			return true
+		case s.bits&EntryTypeScripts != 0 && sourceAttr.Type == SourceFileTypeScript:
+			return true
+		case s.bits&EntryTypeSymlinks != 0 && sourceAttr.Type == SourceFileTypeSymlink:
+			return true
+		case s.bits&EntryTypeAlways != 0 && sourceAttr.Condition == ScriptConditionAlways:
+			return true
+		default:
+			return false
+		}
+	case *SourceStateAbsent:
+		switch {
+		case s.bits&EntryTypeExternals != 0 && isExternal:
+			return true
+		case s.bits&EntryTypeRemove != 0:
+			return true
+		default:
+			return false
+		}
+	default:
+		panic(fmt.Sprintf("%T: unsupported type", sourceStateEntry))
+	}
+}
+
+// ContainsTargetStateEntry returns true if targetStateEntry is a member.
+func (s *EntryTypeSet) ContainsTargetStateEntry(targetStateEntry TargetStateEntry) bool {
+	sourceAttr := targetStateEntry.SourceAttr()
 	switch targetStateEntry.(type) {
 	case *TargetStateDir:
-		return s.bits&EntryTypeDirs != 0
+		switch {
+		case s.bits&EntryTypeExternals != 0 && sourceAttr.External:
+			return true
+		case s.bits&EntryTypeDirs != 0:
+			return true
+		default:
+			return false
+		}
 	case *TargetStateFile:
-		return s.bits&EntryTypeFiles != 0
-	case *TargetStateRemove:
+		switch {
+		case s.bits&EntryTypeEncrypted != 0 && sourceAttr.Encrypted:
+			return true
+		case s.bits&EntryTypeExternals != 0 && sourceAttr.External:
+			return true
+		case s.bits&EntryTypeTemplates != 0 && sourceAttr.Template:
+			return true
+		case s.bits&EntryTypeFiles != 0:
+			return true
+		default:
+			return false
+		}
+	case *TargetStateModifyDirWithCmd:
+		switch {
+		case s.bits&EntryTypeExternals != 0 && sourceAttr.External:
+			return true
+		case s.bits&EntryTypeDirs != 0:
+			return true
+		default:
+			return false
+		}
+	case *TargetStateAbsent:
 		return s.bits&EntryTypeRemove != 0
 	case *TargetStateScript:
-		return s.bits&EntryTypeScripts != 0
+		switch {
+		case s.bits&EntryTypeEncrypted != 0 && sourceAttr.Encrypted:
+			return true
+		case s.bits&EntryTypeTemplates != 0 && sourceAttr.Template:
+			return true
+		case s.bits&EntryTypeAlways != 0 && sourceAttr.Condition == ScriptConditionAlways:
+			return true
+		case s.bits&EntryTypeScripts != 0:
+			return true
+		default:
+			return false
+		}
 	case *TargetStateSymlink:
-		return s.bits&EntryTypeSymlinks != 0
-	case *targetStateRenameDir:
-		return s.bits&EntryTypeDirs != 0
+		switch {
+		case s.bits&EntryTypeEncrypted != 0 && sourceAttr.Encrypted:
+			return true
+		case s.bits&EntryTypeExternals != 0 && sourceAttr.External:
+			return true
+		case s.bits&EntryTypeTemplates != 0 && sourceAttr.Template:
+			return true
+		case s.bits&EntryTypeSymlinks != 0:
+			return true
+		default:
+			return false
+		}
 	default:
-		return false
+		panic(fmt.Sprintf("%T: unsupported type", targetStateEntry))
 	}
+}
+
+// MarshalJSON implements encoding/json.Marshaler.MarshalJSON.
+func (s EntryTypeSet) MarshalJSON() ([]byte, error) {
+	switch s.bits {
+	case EntryTypesAll:
+		return []byte(`["all"]`), nil
+	case EntryTypesNone:
+		return []byte("[]"), nil
+	default:
+		var elements []string
+		for _, key := range entryTypeStrings {
+			if bit := entryTypeBits[key]; s.bits&bit == bit {
+				elements = append(elements, `"`+key+`"`)
+			}
+		}
+		return []byte("[" + strings.Join(elements, ",") + "]"), nil
+	}
+}
+
+// MarshalYAML implements github.com/goccy/go-yaml.Marshaler.
+func (s EntryTypeSet) MarshalYAML() (any, error) {
+	if s.bits == EntryTypesAll {
+		return []string{"all"}, nil
+	}
+	var result []string
+	for _, key := range entryTypeStrings {
+		if bit := entryTypeBits[key]; s.bits&bit == bit {
+			result = append(result, key)
+		}
+	}
+	return result, nil
 }
 
 // Set implements github.com/spf13/pflag.Value.Set.
@@ -113,17 +288,17 @@ func (s *EntryTypeSet) Set(str string) error {
 		s.bits = EntryTypesNone
 		return nil
 	}
+	return s.SetSlice(strings.Split(str, ","))
+}
 
-	var bits EntryTypeBits
-	for i, element := range strings.Split(str, ",") {
+// SetSlice sets s from a []string.
+func (s *EntryTypeSet) SetSlice(ss []string) error {
+	bits := EntryTypesNone
+	for i, element := range ss {
 		if element == "" {
 			continue
 		}
-		exclude := false
-		if strings.HasPrefix(element, "no") {
-			exclude = true
-			element = element[2:]
-		}
+		element, exclude := strings.CutPrefix(element, "no")
 		bit, ok := entryTypeBits[element]
 		if !ok {
 			return fmt.Errorf("%s: unknown entry type", element)
@@ -141,37 +316,73 @@ func (s *EntryTypeSet) Set(str string) error {
 	return nil
 }
 
+// String implements github.com/spf13/pflag.Value.String.
 func (s *EntryTypeSet) String() string {
-	//nolint:exhaustive
+	if s == nil {
+		return "none"
+	}
 	switch s.bits {
 	case EntryTypesAll:
 		return "all"
 	case EntryTypesNone:
 		return "none"
 	}
-	var elements []string
-	for i, element := range []string{
-		"dirs",
-		"files",
-		"remove",
-		"scripts",
-		"symlinks",
-	} {
-		if s.bits&(1<<i) != 0 {
-			elements = append(elements, element)
+	var entryTypeStrs []string
+	for _, entryTypeStr := range entryTypeStrings {
+		bits := entryTypeBits[entryTypeStr]
+		if s.bits&bits == bits {
+			entryTypeStrs = append(entryTypeStrs, entryTypeStr)
 		}
 	}
-	return strings.Join(elements, ",")
-}
-
-// Sub returns a copy of s with the elements of other removed.
-func (s *EntryTypeSet) Sub(other *EntryTypeSet) *EntryTypeSet {
-	return &EntryTypeSet{
-		bits: (s.bits &^ other.bits) & EntryTypesAll,
-	}
+	return strings.Join(entryTypeStrs, ",")
 }
 
 // Type implements github.com/spf13/pflag.Value.Type.
 func (s *EntryTypeSet) Type() string {
-	return "entry type set"
+	return "types"
+}
+
+// StringSliceToEntryTypeSetHookFunc is a
+// github.com/go-viper/mapstructure/v2.DecodeHookFunc that parses an
+// EntryTypeSet from a []string.
+func StringSliceToEntryTypeSetHookFunc() mapstructure.DecodeHookFunc {
+	return func(from, to reflect.Type, data any) (any, error) {
+		if to != reflect.TypeFor[EntryTypeSet]() {
+			return data, nil
+		}
+		elemsAny, ok := data.([]any)
+		if !ok {
+			return nil, fmt.Errorf("expected a []string, got a %T", data)
+		}
+		elemStrs := make([]string, len(elemsAny))
+		for i, elemAny := range elemsAny {
+			elemStr, ok := elemAny.(string)
+			if !ok {
+				return nil, fmt.Errorf("expected a []string, got a %T element", elemAny)
+			}
+			elemStrs[i] = elemStr
+		}
+		s := NewEntryTypeSet(EntryTypesNone)
+		if err := s.SetSlice(elemStrs); err != nil {
+			return nil, err
+		}
+		return s, nil
+	}
+}
+
+// EntryTypeSetFlagCompletionFunc completes EntryTypeSet flags.
+func EntryTypeSetFlagCompletionFunc(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
+	var completions []string
+	entryTypes := strings.Split(toComplete, ",")
+	lastEntryType := entryTypes[len(entryTypes)-1]
+	var prefix string
+	if len(entryTypes) > 0 {
+		prefix = toComplete[:len(toComplete)-len(lastEntryType)]
+	}
+	for _, completion := range entryTypeCompletions {
+		if strings.HasPrefix(completion, lastEntryType) {
+			completions = append(completions, prefix+completion)
+		}
+	}
+	return completions, cobra.ShellCompDirectiveNoSpace | cobra.ShellCompDirectiveNoFileComp
 }

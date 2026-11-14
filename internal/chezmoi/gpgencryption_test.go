@@ -1,31 +1,23 @@
 package chezmoi
 
 import (
-	"errors"
-	"os"
-	"os/exec"
+	"runtime"
 	"testing"
 
-	"github.com/stretchr/testify/require"
+	"github.com/alecthomas/assert/v2"
 
-	"github.com/twpayne/chezmoi/internal/chezmoitest"
+	"chezmoi.io/chezmoi/v2/internal/chezmoitest"
 )
 
 func TestGPGEncryption(t *testing.T) {
-	command, err := chezmoitest.GPGCommand()
-	if errors.Is(err, exec.ErrNotFound) {
-		t.Skip("gpg not found in $PATH")
+	if runtime.GOOS == "windows" {
+		t.Skip("skipping gpg tests on Windows")
 	}
-	require.NoError(t, err)
+	command := lookPathOrSkip(t, "gpg")
 
-	tempDir, err := os.MkdirTemp("", "chezmoi-test-gpg")
-	require.NoError(t, err)
-	defer func() {
-		require.NoError(t, os.RemoveAll(tempDir))
-	}()
-
+	tempDir := t.TempDir()
 	key, passphrase, err := chezmoitest.GPGGenerateKey(command, tempDir)
-	require.NoError(t, err)
+	assert.NoError(t, err)
 
 	for _, tc := range []struct {
 		name      string
@@ -41,7 +33,7 @@ func TestGPGEncryption(t *testing.T) {
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			gpgEncryption := &GPGEncryption{
+			testEncryption(t, &GPGEncryption{
 				Command: command,
 				Args: []string{
 					"--homedir", tempDir,
@@ -51,11 +43,7 @@ func TestGPGEncryption(t *testing.T) {
 				},
 				Recipient: key,
 				Symmetric: tc.symmetric,
-			}
-
-			testEncryptionDecryptToFile(t, gpgEncryption)
-			testEncryptionEncryptDecrypt(t, gpgEncryption)
-			testEncryptionEncryptFile(t, gpgEncryption)
+			})
 		})
 	}
 }

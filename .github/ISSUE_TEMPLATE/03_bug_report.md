@@ -3,8 +3,16 @@ name: Bug report
 about: Report a bug
 title: ''
 assignees: ''
-
 ---
+
+<!--
+
+chezmoi has a strict zero-tolerance policy on LLM contributions. If you use an
+LLM (Large Language Model, like ChatGPT, Claude, Gemini, GitHub Copilot, or
+Llama) to make any kind of contribution then you will immediately be banned
+without recourse.
+
+-->
 
 ## Describe the bug
 
@@ -18,17 +26,21 @@ Steps to reproduce the behavior.
 
 A clear and concise description of what you expected to happen.
 
-## Output of command with `--verbose`
+## Output of command with the `--verbose` flag
 
-```
-$ chezmoi command --verbose
+```console
+$ chezmoi --verbose $COMMAND
 ```
 
 ## Output of `chezmoi doctor`
 
-```
+<details>
+
+```console
 $ chezmoi doctor
 ```
+
+</details>
 
 ## Additional context
 

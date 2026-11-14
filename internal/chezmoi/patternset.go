@@ -1,108 +1,126 @@
 package chezmoi
 
 import (
+	"fmt"
+	"log/slog"
+	"path"
 	"path/filepath"
-	"sort"
+	"slices"
 
-	"github.com/bmatcuk/doublestar/v3"
-	vfs "github.com/twpayne/go-vfs/v2"
+	"github.com/bmatcuk/doublestar/v4"
+	"github.com/twpayne/go-vfs/v5"
+
+	"chezmoi.io/chezmoi/v2/internal/chezmoiset"
 )
 
-// A stringSet is a set of strings.
-type stringSet map[string]struct{}
+type PatternSetIncludeType bool
 
-// An patternSet is a set of patterns.
-type patternSet struct {
-	includePatterns stringSet
-	excludePatterns stringSet
+const (
+	PatternSetInclude PatternSetIncludeType = true
+	PatternSetExclude PatternSetIncludeType = false
+)
+
+type PatternSetMatchType int
+
+const (
+	PatternSetMatchInclude PatternSetMatchType = 1
+	PatternSetMatchUnknown PatternSetMatchType = 0
+	PatternSetMatchExclude PatternSetMatchType = -1
+)
+
+// An PatternSet is a set of patterns.
+type PatternSet struct {
+	IncludePatterns chezmoiset.Set[string]
+	ExcludePatterns chezmoiset.Set[string]
 }
 
-// newPatternSet returns a new patternSet.
-func newPatternSet() *patternSet {
-	return &patternSet{
-		includePatterns: newStringSet(),
-		excludePatterns: newStringSet(),
+// NewPatternSet returns a new patternSet.
+func NewPatternSet() *PatternSet {
+	return &PatternSet{
+		IncludePatterns: chezmoiset.New[string](),
+		ExcludePatterns: chezmoiset.New[string](),
 	}
 }
 
-// add adds a pattern to ps.
-func (ps *patternSet) add(pattern string, include bool) error {
-	if _, err := doublestar.Match(pattern, ""); err != nil {
-		return err
+// Add adds a pattern to ps.
+func (ps *PatternSet) Add(pattern string, include PatternSetIncludeType) error {
+	if ok := doublestar.ValidatePattern(pattern); !ok {
+		return fmt.Errorf("%s: invalid pattern", pattern)
 	}
-	if include {
-		ps.includePatterns.add(pattern)
-	} else {
-		ps.excludePatterns.add(pattern)
+	switch include {
+	case PatternSetInclude:
+		ps.IncludePatterns.Add(pattern)
+	case PatternSetExclude:
+		ps.ExcludePatterns.Add(pattern)
 	}
 	return nil
 }
 
-// glob returns all matches in fs.
-func (ps *patternSet) glob(fs vfs.FS, prefix string) ([]string, error) {
-	// FIXME use AbsPath and RelPath
-	vos := doubleStarOS{FS: fs}
-	allMatches := newStringSet()
-	for includePattern := range ps.includePatterns {
-		matches, err := doublestar.GlobOS(vos, prefix+includePattern)
+// Glob returns all matches in fileSystem.
+func (ps *PatternSet) Glob(fileSystem vfs.FS, prefix string) ([]string, error) {
+	allMatches := chezmoiset.New[string]()
+	for includePattern := range ps.IncludePatterns {
+		matches, err := Glob(fileSystem, filepath.ToSlash(prefix+includePattern))
 		if err != nil {
 			return nil, err
 		}
-		allMatches.add(matches...)
+		allMatches.Add(matches...)
 	}
 	for match := range allMatches {
-		for excludePattern := range ps.excludePatterns {
-			exclude, err := doublestar.PathMatchOS(vos, prefix+excludePattern, match)
+		for excludePattern := range ps.ExcludePatterns {
+			exclude, err := doublestar.Match(path.Clean(prefix+excludePattern), match)
 			if err != nil {
 				return nil, err
 			}
 			if exclude {
-				delete(allMatches, match)
+				allMatches.Remove(match)
 			}
 		}
 	}
-	matchesSlice := allMatches.elements()
-	for i, match := range matchesSlice {
-		matchesSlice[i] = mustTrimPrefix(filepath.ToSlash(match), prefix)
+	sortedMatches := slices.Sorted(allMatches.Elements())
+	for i, match := range sortedMatches {
+		sortedMatches[i] = filepath.ToSlash(match)[len(prefix):]
 	}
-	sort.Strings(matchesSlice)
-	return matchesSlice, nil
+	return sortedMatches, nil
 }
 
-// match returns if name matches any pattern in ps.
-func (ps *patternSet) match(name string) bool {
-	for pattern := range ps.excludePatterns {
+// LogValue implements log/slog.LogValuer.LogValue.
+func (ps *PatternSet) LogValue() slog.Value {
+	if ps == nil {
+		return slog.Value{}
+	}
+	return slog.GroupValue(
+		slog.Any("includePatterns", slices.Sorted(ps.IncludePatterns.Elements())),
+		slog.Any("excludePatterns", slices.Sorted(ps.ExcludePatterns.Elements())),
+	)
+}
+
+// Match returns if name matches ps.
+func (ps *PatternSet) Match(name string) PatternSetMatchType {
+	// If name is explicitly excluded, then return exclude.
+	for pattern := range ps.ExcludePatterns {
 		if ok, _ := doublestar.Match(pattern, name); ok {
-			return false
+			return PatternSetMatchExclude
 		}
 	}
-	for pattern := range ps.includePatterns {
+
+	// If name is explicitly included, then return include.
+	for pattern := range ps.IncludePatterns {
 		if ok, _ := doublestar.Match(pattern, name); ok {
-			return true
+			return PatternSetMatchInclude
 		}
 	}
-	return false
-}
 
-// newStringSet returns a new StringSet containing elements.
-func newStringSet(elements ...string) stringSet {
-	s := make(stringSet)
-	s.add(elements...)
-	return s
-}
-
-// add adds elements to s.
-func (s stringSet) add(elements ...string) {
-	for _, element := range elements {
-		s[element] = struct{}{}
+	// If name did not match any include or exclude patterns...
+	switch {
+	case len(ps.IncludePatterns) > 0 && len(ps.ExcludePatterns) == 0:
+		// ...only include patterns were specified, so exclude by default.
+		return PatternSetMatchExclude
+	case len(ps.IncludePatterns) == 0 && len(ps.ExcludePatterns) > 0:
+		// ...only exclude patterns were specified, so include by default.
+		return PatternSetMatchInclude
+	default:
+		// ...both include and exclude were specified, so return unknown.
+		return PatternSetMatchUnknown
 	}
-}
-
-// elements returns all the elements of s.
-func (s stringSet) elements() []string {
-	elements := make([]string, 0, len(s))
-	for element := range s {
-		elements = append(elements, element)
-	}
-	return elements
 }

@@ -1,19 +1,22 @@
 package chezmoi
 
 import (
-	"github.com/rs/zerolog/log"
+	"log/slog"
 
-	"github.com/twpayne/chezmoi/internal/chezmoilog"
+	"chezmoi.io/chezmoi/v2/internal/chezmoilog"
 )
 
 // A DebugEncryption logs all calls to an Encryption.
 type DebugEncryption struct {
+	logger     *slog.Logger
 	encryption Encryption
 }
 
-// NewDebugEncryption returns a new DebugEncryption.
-func NewDebugEncryption(encryption Encryption) *DebugEncryption {
+// NewDebugEncryption returns a new DebugEncryption that logs methods on
+// encryption to logger.
+func NewDebugEncryption(encryption Encryption, logger *slog.Logger) *DebugEncryption {
 	return &DebugEncryption{
+		logger:     logger,
 		encryption: encryption,
 	}
 }
@@ -21,44 +24,40 @@ func NewDebugEncryption(encryption Encryption) *DebugEncryption {
 // Decrypt implements Encryption.Decrypt.
 func (e *DebugEncryption) Decrypt(ciphertext []byte) ([]byte, error) {
 	plaintext, err := e.encryption.Decrypt(ciphertext)
-	log.Debug().
-		Bytes("ciphertext", chezmoilog.FirstFewBytes(ciphertext)).
-		Err(err).
-		Bytes("plaintext", chezmoilog.FirstFewBytes(plaintext)).
-		Msg("Decrypt")
+	chezmoilog.InfoOrError(e.logger, "Decrypt", err,
+		chezmoilog.FirstFewBytes("ciphertext", ciphertext),
+		chezmoilog.FirstFewBytes("plaintext", plaintext),
+	)
 	return plaintext, err
 }
 
 // DecryptToFile implements Encryption.DecryptToFile.
-func (e *DebugEncryption) DecryptToFile(filename string, ciphertext []byte) error {
-	err := e.encryption.DecryptToFile(filename, ciphertext)
-	log.Debug().
-		Str("filename", filename).
-		Bytes("ciphertext", chezmoilog.FirstFewBytes(ciphertext)).
-		Err(err).
-		Msg("DecryptToFile")
+func (e *DebugEncryption) DecryptToFile(plaintextAbsPath AbsPath, ciphertext []byte) error {
+	err := e.encryption.DecryptToFile(plaintextAbsPath, ciphertext)
+	chezmoilog.InfoOrError(e.logger, "DecryptToFile", err,
+		chezmoilog.Stringer("plaintextAbsPath", plaintextAbsPath),
+		chezmoilog.FirstFewBytes("ciphertext", ciphertext),
+	)
 	return err
 }
 
 // Encrypt implements Encryption.Encrypt.
 func (e *DebugEncryption) Encrypt(plaintext []byte) ([]byte, error) {
 	ciphertext, err := e.encryption.Encrypt(plaintext)
-	log.Debug().
-		Bytes("plaintext", chezmoilog.FirstFewBytes(plaintext)).
-		Err(err).
-		Bytes("ciphertext", chezmoilog.FirstFewBytes(ciphertext)).
-		Msg("Encrypt")
+	chezmoilog.InfoOrError(e.logger, "Encrypt", err,
+		chezmoilog.FirstFewBytes("plaintext", plaintext),
+		chezmoilog.FirstFewBytes("ciphertext", ciphertext),
+	)
 	return ciphertext, err
 }
 
 // EncryptFile implements Encryption.EncryptFile.
-func (e *DebugEncryption) EncryptFile(filename string) ([]byte, error) {
-	ciphertext, err := e.encryption.EncryptFile(filename)
-	log.Debug().
-		Str("filename", filename).
-		Err(err).
-		Bytes("ciphertext", chezmoilog.FirstFewBytes(ciphertext)).
-		Msg("EncryptFile")
+func (e *DebugEncryption) EncryptFile(plaintextAbsPath AbsPath) ([]byte, error) {
+	ciphertext, err := e.encryption.EncryptFile(plaintextAbsPath)
+	chezmoilog.InfoOrError(e.logger, "EncryptFile", err,
+		chezmoilog.Stringer("plaintextAbsPath", plaintextAbsPath),
+		chezmoilog.FirstFewBytes("ciphertext", ciphertext),
+	)
 	return ciphertext, err
 }
 

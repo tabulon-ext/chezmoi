@@ -1,8 +1,11 @@
 package chezmoi
 
 import (
+	"path"
 	"strings"
 )
+
+var emptySourceRelPath SourceRelPath
 
 // A SourceRelPath is a relative path to an entry in the source state.
 type SourceRelPath struct {
@@ -10,25 +13,18 @@ type SourceRelPath struct {
 	isDir   bool
 }
 
-// SourceRelPaths is a slice of SourceRelPaths that implements sort.Interface.
-type SourceRelPaths []SourceRelPath
-
-func (ps SourceRelPaths) Len() int           { return len(ps) }
-func (ps SourceRelPaths) Less(i, j int) bool { return string(ps[i].relPath) < string(ps[j].relPath) }
-func (ps SourceRelPaths) Swap(i, j int)      { ps[i], ps[j] = ps[j], ps[i] }
-
 // NewSourceRelDirPath returns a new SourceRelPath for a directory.
-func NewSourceRelDirPath(relPath RelPath) SourceRelPath {
+func NewSourceRelDirPath(relPath string) SourceRelPath {
 	return SourceRelPath{
-		relPath: relPath,
+		relPath: NewRelPath(relPath),
 		isDir:   true,
 	}
 }
 
 // NewSourceRelPath returns a new SourceRelPath.
-func NewSourceRelPath(relPath RelPath) SourceRelPath {
+func NewSourceRelPath(relPath string) SourceRelPath {
 	return SourceRelPath{
-		relPath: relPath,
+		relPath: NewRelPath(relPath),
 	}
 }
 
@@ -40,20 +36,29 @@ func (p SourceRelPath) Dir() SourceRelPath {
 	}
 }
 
-// Empty returns true if p is empty.
-func (p SourceRelPath) Empty() bool {
+// IsEmpty returns true if p is empty.
+func (p SourceRelPath) IsEmpty() bool {
 	return p == SourceRelPath{}
 }
 
-// Join appends elems to p.
-func (p SourceRelPath) Join(elems ...SourceRelPath) SourceRelPath {
-	elemRelPaths := make(RelPaths, 0, len(elems))
-	for _, elem := range elems {
-		elemRelPaths = append(elemRelPaths, elem.relPath)
+// Join appends sourceRelPaths to p.
+func (p SourceRelPath) Join(sourceRelPaths ...SourceRelPath) SourceRelPath {
+	if len(sourceRelPaths) == 0 {
+		return p
+	}
+	relPaths := make([]RelPath, len(sourceRelPaths))
+	for i, sourceRelPath := range sourceRelPaths {
+		relPaths[i] = sourceRelPath.relPath
 	}
 	return SourceRelPath{
-		relPath: p.relPath.Join(elemRelPaths...),
+		relPath: p.relPath.Join(relPaths...),
+		isDir:   sourceRelPaths[len(sourceRelPaths)-1].isDir,
 	}
+}
+
+// MarshalText implements encoding.TextMarshaler.MarshalText.
+func (p SourceRelPath) MarshalText() ([]byte, error) {
+	return []byte(p.relPath.String()), nil
 }
 
 // RelPath returns p as a relative path.
@@ -62,31 +67,45 @@ func (p SourceRelPath) RelPath() RelPath {
 }
 
 // Split returns the p's file and directory.
-func (p SourceRelPath) Split() (SourceRelPath, SourceRelPath) {
+func (p SourceRelPath) Split() (dirSourceRelPath, fileSourceRelPath SourceRelPath) {
 	dir, file := p.relPath.Split()
-	return NewSourceRelDirPath(dir), NewSourceRelPath(file)
+	return NewSourceRelDirPath(dir.String()), NewSourceRelPath(file.String())
 }
 
 func (p SourceRelPath) String() string {
-	return string(p.relPath)
+	return p.relPath.String()
 }
 
 // TargetRelPath returns the relative path of p's target.
-func (p SourceRelPath) TargetRelPath(encryptedSuffix string) RelPath {
-	sourceNames := strings.Split(string(p.relPath), "/")
-	relPathNames := make([]string, 0, len(sourceNames))
+func (p SourceRelPath) TargetRelPath(encryptedSuffix string) (RelPath, error) {
+	sourceNames := strings.Split(p.relPath.String(), "/")
+	relPathStrs := make([]string, 0, len(sourceNames))
 	if p.isDir {
-		for _, sourceName := range sourceNames {
-			dirAttr := parseDirAttr(sourceName)
-			relPathNames = append(relPathNames, dirAttr.TargetName)
+		for i, sourceName := range sourceNames {
+			if i == 0 && sourceName == "" {
+				// Special case: we allow the first element to be empty.
+				relPathStrs = append(relPathStrs, "")
+				continue
+			}
+			dirAttr, err := parseDirAttr(sourceName)
+			if err != nil {
+				return RelPath{}, err
+			}
+			relPathStrs = append(relPathStrs, dirAttr.TargetName)
 		}
 	} else {
 		for _, sourceName := range sourceNames[:len(sourceNames)-1] {
-			dirAttr := parseDirAttr(sourceName)
-			relPathNames = append(relPathNames, dirAttr.TargetName)
+			dirAttr, err := parseDirAttr(sourceName)
+			if err != nil {
+				return RelPath{}, err
+			}
+			relPathStrs = append(relPathStrs, dirAttr.TargetName)
 		}
-		fileAttr := parseFileAttr(sourceNames[len(sourceNames)-1], encryptedSuffix)
-		relPathNames = append(relPathNames, fileAttr.TargetName)
+		fileAttr, err := parseFileAttr(sourceNames[len(sourceNames)-1], encryptedSuffix)
+		if err != nil {
+			return RelPath{}, err
+		}
+		relPathStrs = append(relPathStrs, fileAttr.TargetName)
 	}
-	return RelPath(strings.Join(relPathNames, "/"))
+	return NewRelPath(path.Join(relPathStrs...)), nil
 }

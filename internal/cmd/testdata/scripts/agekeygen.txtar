@@ -1,0 +1,21 @@
+# test that chezmoi age-keygen generates an age identity on stdout
+exec chezmoi age-keygen
+stdout AGE-SECRET-KEY
+
+# test that chezmoi age-keygen generates post-quantum age identities on stdout
+exec chezmoi age-keygen --pq
+stdout AGE-SECRET-KEY-PQ
+
+# test that chezmoi age-keygen generates an age identity and writes it to a file
+exec chezmoi age-keygen --output=identity.txt
+grep AGE-SECRET-KEY identity.txt
+cmpmod 600 identity.txt
+
+# test that chezmoi age-keygen writes a private file, even if the output file already exists
+chmod 777 identity.txt
+exec chezmoi age-keygen -o identity.txt
+cmpmod 600 identity.txt
+
+# test that age-keygen --convert converts an age identity to an age recipient
+exec chezmoi age-keygen --convert identity.txt
+stdout '^age'

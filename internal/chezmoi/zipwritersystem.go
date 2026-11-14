@@ -1,80 +1,88 @@
 package chezmoi
 
 import (
-	"archive/zip"
 	"io"
-	"os"
+	"io/fs"
+	"os/exec"
 	"time"
+
+	"github.com/klauspost/compress/zip"
 )
 
 // A ZIPWriterSystem is a System that writes to a ZIP archive.
 type ZIPWriterSystem struct {
 	emptySystemMixin
 	noUpdateSystemMixin
-	w        *zip.Writer
-	modified time.Time
+
+	zipWriter *zip.Writer
+	modified  time.Time
 }
 
 // NewZIPWriterSystem returns a new ZIPWriterSystem that writes a ZIP archive to
 // w.
 func NewZIPWriterSystem(w io.Writer, modified time.Time) *ZIPWriterSystem {
 	return &ZIPWriterSystem{
-		w:        zip.NewWriter(w),
-		modified: modified,
+		zipWriter: zip.NewWriter(w),
+		modified:  modified,
 	}
 }
 
 // Close closes m.
 func (s *ZIPWriterSystem) Close() error {
-	return s.w.Close()
+	return s.zipWriter.Close()
 }
 
 // Mkdir implements System.Mkdir.
-func (s *ZIPWriterSystem) Mkdir(name AbsPath, perm os.FileMode) error {
-	fh := zip.FileHeader{
-		Name:     string(name),
+func (s *ZIPWriterSystem) Mkdir(name AbsPath, perm fs.FileMode) error {
+	fileHeader := zip.FileHeader{
+		Name:     name.String(),
 		Modified: s.modified,
 	}
-	fh.SetMode(os.ModeDir | perm)
-	_, err := s.w.CreateHeader(&fh)
+	fileHeader.SetMode(fs.ModeDir | perm)
+	_, err := s.zipWriter.CreateHeader(&fileHeader)
 	return err
 }
 
+// RunCmd implements System.RunCmd.
+func (s *ZIPWriterSystem) RunCmd(cmd *exec.Cmd) error {
+	return nil
+}
+
 // RunScript implements System.RunScript.
-func (s *ZIPWriterSystem) RunScript(scriptname RelPath, dir AbsPath, data []byte) error {
-	return s.WriteFile(AbsPath(scriptname), data, 0o700)
+func (s *ZIPWriterSystem) RunScript(scriptName RelPath, dir AbsPath, data []byte, options RunScriptOptions) error {
+	return s.WriteFile(NewAbsPath(scriptName.String()), data, 0o700)
 }
 
 // WriteFile implements System.WriteFile.
-func (s *ZIPWriterSystem) WriteFile(filename AbsPath, data []byte, perm os.FileMode) error {
-	fh := zip.FileHeader{
-		Name:               string(filename),
+func (s *ZIPWriterSystem) WriteFile(filename AbsPath, data []byte, perm fs.FileMode) error {
+	fileHeader := zip.FileHeader{
+		Name:               filename.String(),
 		Method:             zip.Deflate,
 		Modified:           s.modified,
 		UncompressedSize64: uint64(len(data)),
 	}
-	fh.SetMode(perm)
-	fw, err := s.w.CreateHeader(&fh)
+	fileHeader.SetMode(perm)
+	fileWriter, err := s.zipWriter.CreateHeader(&fileHeader)
 	if err != nil {
 		return err
 	}
-	_, err = fw.Write(data)
+	_, err = fileWriter.Write(data)
 	return err
 }
 
 // WriteSymlink implements System.WriteSymlink.
-func (s *ZIPWriterSystem) WriteSymlink(oldname string, newname AbsPath) error {
-	data := []byte(oldname)
-	fh := zip.FileHeader{
-		Name:               string(newname),
+func (s *ZIPWriterSystem) WriteSymlink(oldName string, newName AbsPath) error {
+	data := []byte(oldName)
+	fileHeader := zip.FileHeader{
+		Name:               newName.String(),
 		Modified:           s.modified,
 		UncompressedSize64: uint64(len(data)),
 	}
-	fh.SetMode(os.ModeSymlink)
-	fw, err := s.w.CreateHeader(&fh)
+	fileHeader.SetMode(fs.ModeSymlink)
+	fileWriter, err := s.zipWriter.CreateHeader(&fileHeader)
 	if err != nil {
 		return err
 	}
-	_, err = fw.Write(data)
+	_, err = fileWriter.Write(data)
 	return err
 }

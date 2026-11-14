@@ -1,39 +1,64 @@
 package chezmoi
 
 import (
-	"errors"
+	"io/fs"
 	"os"
-	"unicode/utf16"
-
-	vfs "github.com/twpayne/go-vfs/v2"
-	"golang.org/x/sys/windows"
+	"path/filepath"
+	"slices"
+	"strings"
 )
 
-// FQDNHostname returns the machine's fully-qualified DNS domain name.
-func FQDNHostname(fs vfs.FS) (string, error) {
-	n := uint32(windows.MAX_COMPUTERNAME_LENGTH + 1)
-	buf := make([]uint16, n)
-	err := windows.GetComputerNameEx(windows.ComputerNameDnsFullyQualified, &buf[0], &n)
-	if errors.Is(err, windows.ERROR_MORE_DATA) {
-		buf = make([]uint16, n)
-		err = windows.GetComputerNameEx(windows.ComputerNameDnsFullyQualified, &buf[0], &n)
+const nativeLineEnding = "\r\n"
+
+var pathExts = strings.Split(os.Getenv("PATHEXT"), string(filepath.ListSeparator))
+
+// IsExecutable checks if the file is a regular file and has an
+// extension listed in the PATHEXT environment variable as per
+// https://www.nextofwindows.com/what-is-pathext-environment-variable-in-windows.
+func IsExecutable(fileInfo fs.FileInfo) bool {
+	if fileInfo.Mode().Perm()&0o111 != 0 {
+		return true
 	}
-	if err != nil {
-		return "", err
+	if !fileInfo.Mode().IsRegular() {
+		return false
 	}
-	return string(utf16.Decode(buf[0:n])), nil
+	ext := filepath.Ext(fileInfo.Name())
+	if ext == "" {
+		return false
+	}
+	return slices.ContainsFunc(pathExts, func(pathExt string) bool {
+		return strings.EqualFold(pathExt, ext)
+	})
 }
 
-// isExecutable returns false on Windows.
-func isExecutable(info os.FileInfo) bool {
-	return false
+// UserHomeDir on Windows returns the value of $HOME if it is set and either
+// Cygwin or msys2 is detected, otherwise it falls back to os.UserHomeDir.
+func UserHomeDir() (string, error) {
+	if os.Getenv("CYGWIN") != "" || os.Getenv("MSYSTEM") != "" {
+		if userHomeDir := os.Getenv("HOME"); userHomeDir != "" {
+			return userHomeDir, nil
+		}
+	}
+	return os.UserHomeDir()
 }
 
-// isPrivate returns false on Windows.
-func isPrivate(info os.FileInfo) bool {
-	return false
+// findExecutableExtensions returns valid OS executable extensions for the
+// provided file if it does not already have an extension. The executable
+// extensions are derived from %PathExt%.
+func findExecutableExtensions(path string) []string {
+	cmdExt := filepath.Ext(path)
+	if cmdExt != "" {
+		return []string{path}
+	}
+	result := make([]string, len(pathExts))
+	withoutSuffix := strings.TrimSuffix(path, cmdExt)
+	for i, ext := range pathExts {
+		result[i] = withoutSuffix + ext
+	}
+	return result
 }
 
-func isSlash(c uint8) bool {
+// isSlash returns if c is a slash character.
+func isSlash(c byte) bool {
 	return c == '\\' || c == '/'
 }

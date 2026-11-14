@@ -2,78 +2,188 @@ package chezmoi
 
 import (
 	"bytes"
+	"crypto/sha256"
 	"encoding/hex"
-	"os"
+	"fmt"
+	"io/fs"
+	"os/exec"
 	"runtime"
 	"time"
 )
 
 // A TargetStateEntry represents the state of an entry in the target state.
 type TargetStateEntry interface {
-	Apply(system System, persistentState PersistentState, actualStateEntry ActualStateEntry, umask os.FileMode) error
-	EntryState(umask os.FileMode) (*EntryState, error)
+	Apply(
+		system System,
+		persistentState PersistentState,
+		actualStateEntry ActualStateEntry,
+	) (bool, error)
+	EntryState(umask fs.FileMode) (*EntryState, error)
 	Evaluate() error
-	SkipApply(persistentState PersistentState) (bool, error)
+	SkipApply(persistentState PersistentState, targetAbsPath AbsPath) (bool, error)
+	SourceAttr() SourceAttr
+}
+
+// A TargetStateModifyDirWithCmd represents running a command that modifies
+// a directory.
+type TargetStateModifyDirWithCmd struct {
+	cmdFunc       func() (*exec.Cmd, error)
+	sourceAttr    SourceAttr
+	refreshPeriod Duration
+	forceRefresh  bool
 }
 
 // A TargetStateDir represents the state of a directory in the target state.
 type TargetStateDir struct {
-	perm os.FileMode
+	sourceAttr SourceAttr
+	perm       fs.FileMode
 }
+
+type ContentsFunc func() ([]byte, error)
+
+type ContentsSHA256Func func() ([32]byte, error)
 
 // A TargetStateFile represents the state of a file in the target state.
 type TargetStateFile struct {
-	*lazyContents
-	perm os.FileMode
+	contentsFunc       ContentsFunc
+	contentsSHA256Func ContentsSHA256Func
+	sourceAttr         SourceAttr
+	perm               fs.FileMode
+	empty              bool
+	overwrite          bool
 }
 
-// A TargetStateRemove represents the absence of an entry in the target state.
-type TargetStateRemove struct{}
+// A TargetStateAbsent represents the absence of an entry in the target state.
+type TargetStateAbsent struct{}
 
 // A TargetStateScript represents the state of a script.
 type TargetStateScript struct {
-	*lazyContents
-	name RelPath
-	once bool
+	contentsFunc       ContentsFunc
+	contentsSHA256Func ContentsSHA256Func
+	interpreter        *Interpreter
+	name               RelPath
+	sourceRelPath      SourceRelPath
+	sourceAttr         SourceAttr
+	condition          ScriptCondition
 }
 
 // A TargetStateSymlink represents the state of a symlink in the target state.
 type TargetStateSymlink struct {
-	*lazyLinkname
+	linknameFunc func() (string, error)
+	sourceAttr   SourceAttr
 }
 
-// A targetStateRenameDir represents the renaming of a directory in the target
-// state.
-type targetStateRenameDir struct {
-	oldRelPath RelPath
-	newRelPath RelPath
+// A ModifyDirWithCmdState records the state of a directory modified by a
+// command.
+type ModifyDirWithCmdState struct {
+	Name  AbsPath   `json:"name"  yaml:"name"`
+	RunAt time.Time `json:"runAt" yaml:"runAt"`
 }
 
-// A scriptState records the state of a script that has been run.
-type scriptState struct {
-	Name  string    `json:"name" toml:"name" yaml:"name"`
-	RunAt time.Time `json:"runAt" toml:"runAt" yaml:"runAt"`
+// A ScriptState records the state of a script that has been run.
+type ScriptState struct {
+	Name  RelPath   `json:"name"  yaml:"name"`
+	RunAt time.Time `json:"runAt" yaml:"runAt"`
 }
 
-// Apply updates actualStateEntry to match t. It does not recurse.
-func (t *TargetStateDir) Apply(system System, persistentState PersistentState, actualStateEntry ActualStateEntry, umask os.FileMode) error {
-	if actualStateDir, ok := actualStateEntry.(*ActualStateDir); ok {
-		if runtime.GOOS == "windows" || actualStateDir.perm == t.perm&^umask {
-			return nil
+// Apply updates actualStateEntry to match t.
+func (t *TargetStateModifyDirWithCmd) Apply(
+	system System,
+	persistentState PersistentState,
+	actualStateEntry ActualStateEntry,
+) (bool, error) {
+	if _, ok := actualStateEntry.(*ActualStateDir); !ok {
+		if err := actualStateEntry.Remove(system); err != nil {
+			return false, err
 		}
-		return system.Chmod(actualStateDir.Path(), t.perm&^umask)
 	}
-	if err := actualStateEntry.Remove(system); err != nil {
-		return err
+
+	runAt := time.Now().UTC()
+	cmd, err := t.cmdFunc()
+	if err != nil {
+		return false, err
 	}
-	return system.Mkdir(actualStateEntry.Path(), t.perm&^umask)
+	if err := system.RunCmd(cmd); err != nil {
+		return false, fmt.Errorf("%s: %w", actualStateEntry.Path(), err)
+	}
+
+	modifyDirWithCmdStateKey := []byte(actualStateEntry.Path().String())
+	if err := PersistentStateSet(
+		persistentState, GitRepoExternalStateBucket, modifyDirWithCmdStateKey, &ModifyDirWithCmdState{
+			Name:  actualStateEntry.Path(),
+			RunAt: runAt,
+		},
+	); err != nil {
+		return false, err
+	}
+
+	return true, nil
 }
 
 // EntryState returns t's entry state.
-func (t *TargetStateDir) EntryState(umask os.FileMode) (*EntryState, error) {
+func (t *TargetStateModifyDirWithCmd) EntryState(umask fs.FileMode) (*EntryState, error) {
 	return &EntryState{
 		Type: EntryStateTypeDir,
-		Mode: os.ModeDir | t.perm&^umask,
+		Mode: fs.ModeDir | fs.ModePerm&^umask,
+	}, nil
+}
+
+// Evaluate evaluates t.
+func (t *TargetStateModifyDirWithCmd) Evaluate() error {
+	return nil
+}
+
+// SkipApply implements TargetStateEntry.SkipApply.
+func (t *TargetStateModifyDirWithCmd) SkipApply(persistentState PersistentState, targetAbsPath AbsPath) (bool, error) {
+	if t.forceRefresh {
+		return false, nil
+	}
+	modifyDirWithCmdKey := []byte(targetAbsPath.String())
+	switch modifyDirWithCmdStateBytes, err := persistentState.Get(GitRepoExternalStateBucket, modifyDirWithCmdKey); {
+	case err != nil:
+		return false, err
+	case modifyDirWithCmdStateBytes == nil:
+		return false, nil
+	default:
+		var modifyDirWithCmdState ModifyDirWithCmdState
+		if err := stateFormat.Unmarshal(modifyDirWithCmdStateBytes, &modifyDirWithCmdState); err != nil {
+			return false, err
+		}
+		if t.refreshPeriod == 0 {
+			return true, nil
+		}
+		return time.Since(modifyDirWithCmdState.RunAt) < time.Duration(t.refreshPeriod), nil
+	}
+}
+
+// SourceAttr implements TargetStateEntry.SourceAttr.
+func (t *TargetStateModifyDirWithCmd) SourceAttr() SourceAttr {
+	return t.sourceAttr
+}
+
+// Apply updates actualStateEntry to match t. It does not recurse.
+func (t *TargetStateDir) Apply(
+	system System,
+	persistentState PersistentState,
+	actualStateEntry ActualStateEntry,
+) (bool, error) {
+	if actualStateDir, ok := actualStateEntry.(*ActualStateDir); ok {
+		if runtime.GOOS == "windows" || actualStateDir.perm == t.perm {
+			return false, nil
+		}
+		return true, system.Chmod(actualStateDir.Path(), t.perm)
+	}
+	if err := actualStateEntry.Remove(system); err != nil {
+		return false, err
+	}
+	return true, system.Mkdir(actualStateEntry.Path(), t.perm)
+}
+
+// EntryState returns t's entry state.
+func (t *TargetStateDir) EntryState(umask fs.FileMode) (*EntryState, error) {
+	return &EntryState{
+		Type: EntryStateTypeDir,
+		Mode: fs.ModeDir | t.perm&^umask,
 	}, nil
 }
 
@@ -83,45 +193,76 @@ func (t *TargetStateDir) Evaluate() error {
 }
 
 // SkipApply implements TargetState.SkipApply.
-func (t *TargetStateDir) SkipApply(persistentState PersistentState) (bool, error) {
+func (t *TargetStateDir) SkipApply(persistentState PersistentState, targetAbsPath AbsPath) (bool, error) {
 	return false, nil
 }
 
+// SourceAttr implements TargetStateEntry.SourceAttr.
+func (t *TargetStateDir) SourceAttr() SourceAttr {
+	return t.sourceAttr
+}
+
 // Apply updates actualStateEntry to match t.
-func (t *TargetStateFile) Apply(system System, persistentState PersistentState, actualStateEntry ActualStateEntry, umask os.FileMode) error {
+func (t *TargetStateFile) Apply(
+	system System,
+	persistentState PersistentState,
+	actualStateEntry ActualStateEntry,
+) (bool, error) {
+	contents, err := t.Contents()
+	if err != nil {
+		return false, err
+	}
+	if !t.sourceAttr.External && !t.empty && isEmpty(contents) {
+		if _, ok := actualStateEntry.(*ActualStateAbsent); ok {
+			return false, nil
+		}
+		return true, system.RemoveAll(actualStateEntry.Path())
+	}
 	if actualStateFile, ok := actualStateEntry.(*ActualStateFile); ok {
 		// Compare file contents using only their SHA256 sums. This is so that
 		// we can compare last-written states without storing the full contents
 		// of each file written.
-		actualContentsSHA256, err := actualStateFile.ContentsSHA256()
+		actualContents, err := actualStateFile.Contents()
 		if err != nil {
-			return err
+			return false, err
 		}
+		actualContentsSHA256 := sha256.Sum256(actualContents)
 		contentsSHA256, err := t.ContentsSHA256()
 		if err != nil {
-			return err
+			return false, err
 		}
-		if bytes.Equal(actualContentsSHA256, contentsSHA256) {
-			if runtime.GOOS == "windows" || actualStateFile.perm == t.perm&^umask {
-				return nil
+		if actualContentsSHA256 == contentsSHA256 {
+			if runtime.GOOS == "windows" || actualStateFile.perm == t.perm {
+				return false, nil
 			}
-			return system.Chmod(actualStateFile.Path(), t.perm&^umask)
+			return true, system.Chmod(actualStateFile.Path(), t.perm)
 		}
 	} else if err := actualStateEntry.Remove(system); err != nil {
-		return err
+		return false, err
 	}
-	contents, err := t.Contents()
-	if err != nil {
-		return err
-	}
-	return system.WriteFile(actualStateEntry.Path(), contents, t.perm&^umask)
+	return true, system.WriteFile(actualStateEntry.Path(), contents, t.perm)
+}
+
+// Contents returns t's contents.
+func (t *TargetStateFile) Contents() ([]byte, error) {
+	return t.contentsFunc()
+}
+
+// ContentsSHA256 returns the SHA256 sum of t's contents.
+func (t *TargetStateFile) ContentsSHA256() ([32]byte, error) {
+	return t.contentsSHA256Func()
 }
 
 // EntryState returns t's entry state.
-func (t *TargetStateFile) EntryState(umask os.FileMode) (*EntryState, error) {
+func (t *TargetStateFile) EntryState(umask fs.FileMode) (*EntryState, error) {
 	contents, err := t.Contents()
 	if err != nil {
 		return nil, err
+	}
+	if !t.sourceAttr.External && !t.empty && isEmpty(contents) {
+		return &EntryState{
+			Type: EntryStateTypeRemove,
+		}, nil
 	}
 	contentsSHA256, err := t.ContentsSHA256()
 	if err != nil {
@@ -130,87 +271,144 @@ func (t *TargetStateFile) EntryState(umask os.FileMode) (*EntryState, error) {
 	return &EntryState{
 		Type:           EntryStateTypeFile,
 		Mode:           t.perm &^ umask,
-		ContentsSHA256: HexBytes(contentsSHA256),
+		ContentsSHA256: HexBytes(contentsSHA256[:]),
 		contents:       contents,
+		overwrite:      t.overwrite,
 	}, nil
 }
 
 // Evaluate evaluates t.
 func (t *TargetStateFile) Evaluate() error {
-	_, err := t.ContentsSHA256()
-	return err
+	if _, err := t.Contents(); err != nil {
+		return err
+	}
+	if _, err := t.ContentsSHA256(); err != nil {
+		return err
+	}
+	return nil
 }
 
-// SkipApply implements TargetState.SkipApply.
-func (t *TargetStateFile) SkipApply(persistentState PersistentState) (bool, error) {
+// Perm returns t's perm.
+func (t *TargetStateFile) Perm(umask fs.FileMode) fs.FileMode {
+	return t.perm &^ umask
+}
+
+// SkipApply implements TargetStateEntry.SkipApply.
+func (t *TargetStateFile) SkipApply(persistentState PersistentState, targetAbsPath AbsPath) (bool, error) {
 	return false, nil
 }
 
+// SourceAttr implements TargetStateEntry.SourceAttr.
+func (t *TargetStateFile) SourceAttr() SourceAttr {
+	return t.sourceAttr
+}
+
 // Apply updates actualStateEntry to match t.
-func (t *TargetStateRemove) Apply(system System, persistentState PersistentState, actualStateEntry ActualStateEntry, umask os.FileMode) error {
+func (t *TargetStateAbsent) Apply(
+	system System,
+	persistentState PersistentState,
+	actualStateEntry ActualStateEntry,
+) (bool, error) {
 	if _, ok := actualStateEntry.(*ActualStateAbsent); ok {
-		return nil
+		return false, nil
 	}
-	return system.RemoveAll(actualStateEntry.Path())
+	return true, system.RemoveAll(actualStateEntry.Path())
 }
 
 // EntryState returns t's entry state.
-func (t *TargetStateRemove) EntryState(umask os.FileMode) (*EntryState, error) {
+func (t *TargetStateAbsent) EntryState(umask fs.FileMode) (*EntryState, error) {
 	return &EntryState{
 		Type: EntryStateTypeRemove,
 	}, nil
 }
 
 // Evaluate evaluates t.
-func (t *TargetStateRemove) Evaluate() error {
+func (t *TargetStateAbsent) Evaluate() error {
 	return nil
 }
 
-// SkipApply implements TargetState.SkipApply.
-func (t *TargetStateRemove) SkipApply(persistentState PersistentState) (bool, error) {
+// SkipApply implements TargetStateEntry.SkipApply.
+func (t *TargetStateAbsent) SkipApply(persistentState PersistentState, targetAbsPath AbsPath) (bool, error) {
 	return false, nil
 }
 
+// SourceAttr implements TargetStateEntry.SourceAttr.
+func (t *TargetStateAbsent) SourceAttr() SourceAttr {
+	return SourceAttr{}
+}
+
 // Apply runs t.
-func (t *TargetStateScript) Apply(system System, persistentState PersistentState, actualStateEntry ActualStateEntry, umask os.FileMode) error {
+func (t *TargetStateScript) Apply(
+	system System,
+	persistentState PersistentState,
+	actualStateEntry ActualStateEntry,
+) (bool, error) {
+	skipApply, err := t.SkipApply(persistentState, actualStateEntry.Path())
+	if err != nil {
+		return false, err
+	}
+	if skipApply {
+		return false, nil
+	}
+
 	contentsSHA256, err := t.ContentsSHA256()
 	if err != nil {
-		return err
+		return false, err
 	}
-	key := []byte(hex.EncodeToString(contentsSHA256))
-	if t.once {
-		switch scriptState, err := persistentState.Get(scriptStateBucket, key); {
-		case err != nil:
-			return err
-		case scriptState != nil:
-			return nil
-		}
-	}
+
 	contents, err := t.Contents()
 	if err != nil {
-		return err
+		return false, err
 	}
 	runAt := time.Now().UTC()
 	if !isEmpty(contents) {
-		if err := system.RunScript(t.name, actualStateEntry.Path().Dir(), contents); err != nil {
-			return err
+		if err := system.RunScript(t.name, actualStateEntry.Path().Dir(), contents, RunScriptOptions{
+			Condition:     t.condition,
+			Interpreter:   t.interpreter,
+			SourceRelPath: t.sourceRelPath,
+		}); err != nil {
+			return false, err
 		}
 	}
-	return persistentStateSet(persistentState, scriptStateBucket, key, &scriptState{
-		Name:  string(t.name),
+
+	scriptStateKey := []byte(hex.EncodeToString(contentsSHA256[:]))
+	if err := PersistentStateSet(persistentState, ScriptStateBucket, scriptStateKey, &ScriptState{
+		Name:  t.name,
 		RunAt: runAt,
-	})
+	}); err != nil {
+		return false, err
+	}
+
+	entryStateKey := actualStateEntry.Path().Bytes()
+	if err := PersistentStateSet(persistentState, EntryStateBucket, entryStateKey, &EntryState{
+		Type:           EntryStateTypeScript,
+		ContentsSHA256: HexBytes(contentsSHA256[:]),
+	}); err != nil {
+		return false, err
+	}
+
+	return true, nil
+}
+
+// Contents returns t's contents.
+func (t *TargetStateScript) Contents() ([]byte, error) {
+	return t.contentsFunc()
+}
+
+// ContentsSHA256 returns the SHA256 sum of t's contents.
+func (t *TargetStateScript) ContentsSHA256() ([32]byte, error) {
+	return t.contentsSHA256Func()
 }
 
 // EntryState returns t's entry state.
-func (t *TargetStateScript) EntryState(umask os.FileMode) (*EntryState, error) {
+func (t *TargetStateScript) EntryState(umask fs.FileMode) (*EntryState, error) {
 	contentsSHA256, err := t.ContentsSHA256()
 	if err != nil {
 		return nil, err
 	}
 	return &EntryState{
 		Type:           EntryStateTypeScript,
-		ContentsSHA256: HexBytes(contentsSHA256),
+		ContentsSHA256: HexBytes(contentsSHA256[:]),
 	}, nil
 }
 
@@ -220,64 +418,106 @@ func (t *TargetStateScript) Evaluate() error {
 	return err
 }
 
-// SkipApply implements TargetState.SkipApply.
-func (t *TargetStateScript) SkipApply(persistentState PersistentState) (bool, error) {
-	if !t.once {
-		return false, nil
-	}
-	contentsSHA256, err := t.ContentsSHA256()
-	if err != nil {
-		return false, err
-	}
-	key := []byte(hex.EncodeToString(contentsSHA256))
-	switch scriptState, err := persistentState.Get(scriptStateBucket, key); {
+// SkipApply implements TargetStateEntry.SkipApply.
+func (t *TargetStateScript) SkipApply(persistentState PersistentState, targetAbsPath AbsPath) (bool, error) {
+	switch contents, err := t.Contents(); {
 	case err != nil:
 		return false, err
-	case scriptState != nil:
+	case len(contents) == 0:
 		return true, nil
-	default:
-		return false, nil
 	}
+	switch t.condition {
+	case ScriptConditionAlways:
+		return false, nil
+	case ScriptConditionOnce:
+		contentsSHA256, err := t.ContentsSHA256()
+		if err != nil {
+			return false, err
+		}
+		scriptStateKey := []byte(hex.EncodeToString(contentsSHA256[:]))
+		switch scriptState, err := persistentState.Get(ScriptStateBucket, scriptStateKey); {
+		case err != nil:
+			return false, err
+		case scriptState != nil:
+			return true, nil
+		}
+	case ScriptConditionOnChange:
+		entryStateKey := []byte(targetAbsPath.String())
+		switch entryStateBytes, err := persistentState.Get(EntryStateBucket, entryStateKey); {
+		case err != nil:
+			return false, err
+		case entryStateBytes != nil:
+			var entryState EntryState
+			if err := stateFormat.Unmarshal(entryStateBytes, &entryState); err != nil {
+				return false, err
+			}
+			contentsSHA256, err := t.ContentsSHA256()
+			if err != nil {
+				return false, err
+			}
+			if bytes.Equal(entryState.ContentsSHA256.Bytes(), contentsSHA256[:]) {
+				return true, nil
+			}
+		}
+	}
+	return false, nil
+}
+
+// SourceAttr implements TargetStateEntry.SourceAttr.
+func (t *TargetStateScript) SourceAttr() SourceAttr {
+	return t.sourceAttr
 }
 
 // Apply updates actualStateEntry to match t.
-func (t *TargetStateSymlink) Apply(system System, persistentState PersistentState, actualStateEntry ActualStateEntry, umask os.FileMode) error {
+func (t *TargetStateSymlink) Apply(
+	system System,
+	persistentState PersistentState,
+	actualStateEntry ActualStateEntry,
+) (bool, error) {
+	linkname, err := t.Linkname()
+	if err != nil {
+		return false, err
+	}
+	if linkname == "" {
+		if _, ok := actualStateEntry.(*ActualStateAbsent); ok {
+			return false, nil
+		}
+		return true, system.RemoveAll(actualStateEntry.Path())
+	}
 	if actualStateSymlink, ok := actualStateEntry.(*ActualStateSymlink); ok {
 		actualLinkname, err := actualStateSymlink.Linkname()
 		if err != nil {
-			return err
+			return false, err
 		}
 		linkname, err := t.Linkname()
 		if err != nil {
-			return err
+			return false, err
 		}
-		if actualLinkname == linkname {
-			return nil
+		if normalizeLinkname(actualLinkname) == normalizeLinkname(linkname) {
+			return false, nil
 		}
-	}
-	linkname, err := t.Linkname()
-	if err != nil {
-		return err
 	}
 	if err := actualStateEntry.Remove(system); err != nil {
-		return err
+		return false, err
 	}
-	return system.WriteSymlink(linkname, actualStateEntry.Path())
+	return true, system.WriteSymlink(linkname, actualStateEntry.Path())
 }
 
 // EntryState returns t's entry state.
-func (t *TargetStateSymlink) EntryState(umask os.FileMode) (*EntryState, error) {
+func (t *TargetStateSymlink) EntryState(umask fs.FileMode) (*EntryState, error) {
 	linkname, err := t.Linkname()
 	if err != nil {
 		return nil, err
 	}
-	linknameSHA256, err := t.LinknameSHA256()
-	if err != nil {
-		return nil, err
+	if linkname == "" {
+		return &EntryState{
+			Type: EntryStateTypeRemove,
+		}, nil
 	}
+	linknameSHA256 := sha256.Sum256([]byte(linkname))
 	return &EntryState{
 		Type:           EntryStateTypeSymlink,
-		ContentsSHA256: linknameSHA256,
+		ContentsSHA256: linknameSHA256[:],
 		contents:       []byte(linkname),
 	}, nil
 }
@@ -288,28 +528,16 @@ func (t *TargetStateSymlink) Evaluate() error {
 	return err
 }
 
-// SkipApply implements TargetState.SkipApply.
-func (t *TargetStateSymlink) SkipApply(persistentState PersistentState) (bool, error) {
+func (t *TargetStateSymlink) Linkname() (string, error) {
+	return t.linknameFunc()
+}
+
+// SkipApply implements TargetStateEntry.SkipApply.
+func (t *TargetStateSymlink) SkipApply(persistentState PersistentState, targetAbsPath AbsPath) (bool, error) {
 	return false, nil
 }
 
-// Apply renames actualStateEntry.
-func (t *targetStateRenameDir) Apply(system System, persistentState PersistentState, actualStateEntry ActualStateEntry, umask os.FileMode) error {
-	dir := actualStateEntry.Path().Dir()
-	return system.Rename(dir.Join(t.oldRelPath), dir.Join(t.newRelPath))
-}
-
-// EntryState returns t's entry state.
-func (t *targetStateRenameDir) EntryState(umask os.FileMode) (*EntryState, error) {
-	return nil, nil
-}
-
-// Evaluate does nothing.
-func (t *targetStateRenameDir) Evaluate() error {
-	return nil
-}
-
-// SkipApply implements TargetState.SkipApply.
-func (t *targetStateRenameDir) SkipApply(persistentState PersistentState) (bool, error) {
-	return false, nil
+// SourceAttr implements TargetStateEntry.SourceAttr.
+func (t *TargetStateSymlink) SourceAttr() SourceAttr {
+	return t.sourceAttr
 }

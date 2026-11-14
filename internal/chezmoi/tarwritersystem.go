@@ -3,63 +3,70 @@ package chezmoi
 import (
 	"archive/tar"
 	"io"
-	"os"
+	"io/fs"
+	"os/exec"
 )
 
-// A TARWriterSystem is a System that writes to a TAR archive.
-type TARWriterSystem struct {
+// A TarWriterSystem is a System that writes to a tar archive.
+type TarWriterSystem struct {
 	emptySystemMixin
 	noUpdateSystemMixin
-	w              *tar.Writer
+
+	tarWriter      *tar.Writer
 	headerTemplate tar.Header
 }
 
-// NewTARWriterSystem returns a new TARWriterSystem that writes a TAR file to w.
-func NewTARWriterSystem(w io.Writer, headerTemplate tar.Header) *TARWriterSystem {
-	return &TARWriterSystem{
-		w:              tar.NewWriter(w),
+// NewTarWriterSystem returns a new TarWriterSystem that writes a tar file to w.
+func NewTarWriterSystem(w io.Writer, headerTemplate tar.Header) *TarWriterSystem {
+	return &TarWriterSystem{
+		tarWriter:      tar.NewWriter(w),
 		headerTemplate: headerTemplate,
 	}
 }
 
 // Close closes m.
-func (s *TARWriterSystem) Close() error {
-	return s.w.Close()
+func (s *TarWriterSystem) Close() error {
+	return s.tarWriter.Close()
 }
 
 // Mkdir implements System.Mkdir.
-func (s *TARWriterSystem) Mkdir(name AbsPath, perm os.FileMode) error {
+func (s *TarWriterSystem) Mkdir(name AbsPath, perm fs.FileMode) error {
 	header := s.headerTemplate
 	header.Typeflag = tar.TypeDir
-	header.Name = string(name) + "/"
+	header.Name = name.String() + "/"
 	header.Mode = int64(perm)
-	return s.w.WriteHeader(&header)
+	return s.tarWriter.WriteHeader(&header)
+}
+
+// RunCmd implements System.RunCmd.
+func (s *TarWriterSystem) RunCmd(cmd *exec.Cmd) error {
+	return nil
 }
 
 // RunScript implements System.RunScript.
-func (s *TARWriterSystem) RunScript(scriptname RelPath, dir AbsPath, data []byte) error {
-	return s.WriteFile(AbsPath(scriptname), data, 0o700)
+func (s *TarWriterSystem) RunScript(scriptName RelPath, dir AbsPath, data []byte, options RunScriptOptions) error {
+	return s.WriteFile(NewAbsPath(scriptName.String()), data, 0o700)
 }
 
 // WriteFile implements System.WriteFile.
-func (s *TARWriterSystem) WriteFile(filename AbsPath, data []byte, perm os.FileMode) error {
+func (s *TarWriterSystem) WriteFile(filename AbsPath, data []byte, perm fs.FileMode) error {
 	header := s.headerTemplate
 	header.Typeflag = tar.TypeReg
-	header.Name = string(filename)
+	header.Name = filename.String()
 	header.Size = int64(len(data))
 	header.Mode = int64(perm)
-	if err := s.w.WriteHeader(&header); err != nil {
+	if err := s.tarWriter.WriteHeader(&header); err != nil {
 		return err
 	}
-	_, err := s.w.Write(data)
+	_, err := s.tarWriter.Write(data)
 	return err
 }
 
 // WriteSymlink implements System.WriteSymlink.
-func (s *TARWriterSystem) WriteSymlink(oldname string, newname AbsPath) error {
+func (s *TarWriterSystem) WriteSymlink(oldName string, newName AbsPath) error {
 	header := s.headerTemplate
 	header.Typeflag = tar.TypeSymlink
-	header.Name = string(newname)
-	header.Linkname = oldname
-	return s.w.WriteHeader(&header)
+	header.Name = newName.String()
+	header.Linkname = oldName
+	return s.tarWriter.WriteHeader(&header)
 }

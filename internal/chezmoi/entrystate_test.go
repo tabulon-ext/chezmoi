@@ -2,29 +2,29 @@ package chezmoi
 
 import (
 	"fmt"
-	"os"
+	"io/fs"
+	"maps"
 	"runtime"
-	"sort"
+	"slices"
 	"testing"
 
+	"github.com/alecthomas/assert/v2"
 	"github.com/muesli/combinator"
-	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
 )
 
 func TestEntryStateEquivalent(t *testing.T) {
 	entryStates := map[string]*EntryState{
 		"dir1": {
 			Type: EntryStateTypeDir,
-			Mode: os.ModeDir | 0o777,
+			Mode: fs.ModeDir | fs.ModePerm,
 		},
 		"dir1_copy": {
 			Type: EntryStateTypeDir,
-			Mode: os.ModeDir | 0o777,
+			Mode: fs.ModeDir | fs.ModePerm,
 		},
 		"dir_private": {
 			Type: EntryStateTypeDir,
-			Mode: os.ModeDir | 0o700,
+			Mode: fs.ModeDir | 0o700,
 		},
 		"file1": {
 			Type:           EntryStateTypeFile,
@@ -78,11 +78,7 @@ func TestEntryStateEquivalent(t *testing.T) {
 		"symlink_symlink_copy":  true,
 	}
 
-	entryStateKeys := make([]string, 0, len(entryStates))
-	for entryStateKey := range entryStates {
-		entryStateKeys = append(entryStateKeys, entryStateKey)
-	}
-	sort.Strings(entryStateKeys)
+	entryStateKeys := slices.Sorted(maps.Keys(entryStates))
 
 	testData := struct {
 		EntryState1Key []string
@@ -95,7 +91,7 @@ func TestEntryStateEquivalent(t *testing.T) {
 		EntryState1Key string
 		EntryState2Key string
 	}
-	require.NoError(t, combinator.Generate(&testCases, testData))
+	assert.NoError(t, combinator.Generate(&testCases, testData))
 
 	for _, tc := range testCases {
 		name := fmt.Sprintf("%s_%s", tc.EntryState1Key, tc.EntryState2Key)

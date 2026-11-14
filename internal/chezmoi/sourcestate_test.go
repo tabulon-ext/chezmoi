@@ -1,92 +1,100 @@
 package chezmoi
 
 import (
-	"os"
+	"archive/tar"
+	"bytes"
+	"crypto/sha256"
+	"errors"
+	"fmt"
+	"io/fs"
+	"net/http"
+	"net/http/httptest"
 	"path/filepath"
 	"testing"
 	"text/template"
+	"time"
 
+	"github.com/alecthomas/assert/v2"
 	"github.com/coreos/go-semver/semver"
-	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
-	vfs "github.com/twpayne/go-vfs/v2"
-	"github.com/twpayne/go-vfs/v2/vfst"
+	vfs "github.com/twpayne/go-vfs/v5"
+	"github.com/twpayne/go-vfs/v5/vfst"
 
-	"github.com/twpayne/chezmoi/internal/chezmoitest"
+	"chezmoi.io/chezmoi/v2/internal/chezmoiset"
+	"chezmoi.io/chezmoi/v2/internal/chezmoitest"
 )
 
 func TestSourceStateAdd(t *testing.T) {
 	for _, tc := range []struct {
 		name         string
-		destAbsPaths AbsPaths
+		destAbsPaths []AbsPath
 		addOptions   AddOptions
-		extraRoot    interface{}
-		tests        []interface{}
+		extraRoot    any
+		tests        []any
 	}{
 		{
 			name: "dir",
-			destAbsPaths: AbsPaths{
-				"/home/user/.dir",
+			destAbsPaths: []AbsPath{
+				NewAbsPath("/home/user/.dir"),
 			},
 			addOptions: AddOptions{
-				Include: NewEntryTypeSet(EntryTypesAll),
+				Filter: NewEntryTypeFilter(EntryTypesAll, EntryTypesNone),
 			},
-			tests: []interface{}{
+			tests: []any{
 				vfst.TestPath("/home/user/.local/share/chezmoi/dot_dir",
-					vfst.TestIsDir,
-					vfst.TestModePerm(0o777&^chezmoitest.Umask),
+					vfst.TestIsDir(),
+					vfst.TestModePerm(fs.ModePerm&^chezmoitest.Umask),
 				),
 				vfst.TestPath("/home/user/.local/share/chezmoi/dot_dir/file",
-					vfst.TestDoesNotExist,
+					vfst.TestDoesNotExist(),
 				),
 				vfst.TestPath("/home/user/.local/share/chezmoi/dot_dir/subdir",
-					vfst.TestDoesNotExist,
+					vfst.TestDoesNotExist(),
 				),
 			},
 		},
 		{
 			name: "dir_change_attributes",
-			destAbsPaths: AbsPaths{
-				"/home/user/.dir",
+			destAbsPaths: []AbsPath{
+				NewAbsPath("/home/user/.dir"),
 			},
 			addOptions: AddOptions{
-				Include: NewEntryTypeSet(EntryTypesAll),
+				Filter: NewEntryTypeFilter(EntryTypesAll, EntryTypesNone),
 			},
-			extraRoot: map[string]interface{}{
-				"/home/user": map[string]interface{}{
-					".local/share/chezmoi/exact_dot_dir/file": "# contents of file\n",
+			extraRoot: map[string]any{
+				"/home/user": map[string]any{
+					".local/share/chezmoi/exact_dot_dir/file": "# contents of .dir/file\n",
 				},
 			},
-			tests: []interface{}{
+			tests: []any{
 				vfst.TestPath("/home/user/.local/share/chezmoi/exact_dot_dir",
-					vfst.TestDoesNotExist,
+					vfst.TestDoesNotExist(),
 				),
 				vfst.TestPath("/home/user/.local/share/chezmoi/dot_dir",
-					vfst.TestIsDir,
-					vfst.TestModePerm(0o777&^chezmoitest.Umask),
+					vfst.TestIsDir(),
+					vfst.TestModePerm(fs.ModePerm&^chezmoitest.Umask),
 				),
 				vfst.TestPath("/home/user/.local/share/chezmoi/dot_dir/file",
-					vfst.TestModeIsRegular,
+					vfst.TestModeIsRegular(),
 					vfst.TestModePerm(0o666&^chezmoitest.Umask),
-					vfst.TestContentsString("# contents of file\n"),
+					vfst.TestContentsString("# contents of .dir/file\n"),
 				),
 			},
 		},
 		{
 			name: "dir_file",
-			destAbsPaths: AbsPaths{
-				"/home/user/.dir/file",
+			destAbsPaths: []AbsPath{
+				NewAbsPath("/home/user/.dir/file"),
 			},
 			addOptions: AddOptions{
-				Include: NewEntryTypeSet(EntryTypesAll),
+				Filter: NewEntryTypeFilter(EntryTypesAll, EntryTypesNone),
 			},
-			tests: []interface{}{
+			tests: []any{
 				vfst.TestPath("/home/user/.local/share/chezmoi/dot_dir",
-					vfst.TestIsDir,
-					vfst.TestModePerm(0o777&^chezmoitest.Umask),
+					vfst.TestIsDir(),
+					vfst.TestModePerm(fs.ModePerm&^chezmoitest.Umask),
 				),
 				vfst.TestPath("/home/user/.local/share/chezmoi/dot_dir/file",
-					vfst.TestModeIsRegular,
+					vfst.TestModeIsRegular(),
 					vfst.TestModePerm(0o666&^chezmoitest.Umask),
 					vfst.TestContentsString("# contents of .dir/file\n"),
 				),
@@ -94,66 +102,66 @@ func TestSourceStateAdd(t *testing.T) {
 		},
 		{
 			name: "dir_file_existing_dir",
-			destAbsPaths: AbsPaths{
-				"/home/user/.dir/file",
+			destAbsPaths: []AbsPath{
+				NewAbsPath("/home/user/.dir/file"),
 			},
 			addOptions: AddOptions{
-				Include: NewEntryTypeSet(EntryTypesAll),
+				Filter: NewEntryTypeFilter(EntryTypesAll, EntryTypesNone),
 			},
-			extraRoot: map[string]interface{}{
-				"/home/user/.local/share/chezmoi/dot_dir": &vfst.Dir{Perm: 0o777},
+			extraRoot: map[string]any{
+				"/home/user/.local/share/chezmoi/dot_dir": &vfst.Dir{Perm: fs.ModePerm},
 			},
-			tests: []interface{}{
+			tests: []any{
 				vfst.TestPath("/home/user/.local/share/chezmoi/dot_dir/file",
-					vfst.TestModeIsRegular,
+					vfst.TestModeIsRegular(),
 					vfst.TestContentsString("# contents of .dir/file\n"),
 				),
 			},
 		},
 		{
 			name: "dir_subdir",
-			destAbsPaths: AbsPaths{
-				"/home/user/.dir/subdir",
+			destAbsPaths: []AbsPath{
+				NewAbsPath("/home/user/.dir/subdir"),
 			},
 			addOptions: AddOptions{
-				Include: NewEntryTypeSet(EntryTypesAll),
+				Filter: NewEntryTypeFilter(EntryTypesAll, EntryTypesNone),
 			},
-			tests: []interface{}{
+			tests: []any{
 				vfst.TestPath("/home/user/.local/share/chezmoi/dot_dir",
-					vfst.TestIsDir,
-					vfst.TestModePerm(0o777&^chezmoitest.Umask),
+					vfst.TestIsDir(),
+					vfst.TestModePerm(fs.ModePerm&^chezmoitest.Umask),
 				),
 				vfst.TestPath("/home/user/.local/share/chezmoi/dot_dir/subdir",
-					vfst.TestIsDir,
-					vfst.TestModePerm(0o777&^chezmoitest.Umask),
+					vfst.TestIsDir(),
+					vfst.TestModePerm(fs.ModePerm&^chezmoitest.Umask),
 				),
 				vfst.TestPath("/home/user/.local/share/chezmoi/dot_dir/subdir/file",
-					vfst.TestDoesNotExist,
+					vfst.TestDoesNotExist(),
 				),
 			},
 		},
 		{
 			name: "dir_subdir_file",
-			destAbsPaths: AbsPaths{
-				"/home/user/.dir/subdir/file",
+			destAbsPaths: []AbsPath{
+				NewAbsPath("/home/user/.dir/subdir/file"),
 			},
 			addOptions: AddOptions{
-				Include: NewEntryTypeSet(EntryTypesAll),
+				Filter: NewEntryTypeFilter(EntryTypesAll, EntryTypesNone),
 			},
-			tests: []interface{}{
+			tests: []any{
 				vfst.TestPath("/home/user/.local/share/chezmoi/dot_dir",
-					vfst.TestIsDir,
-					vfst.TestModePerm(0o777&^chezmoitest.Umask),
+					vfst.TestIsDir(),
+					vfst.TestModePerm(fs.ModePerm&^chezmoitest.Umask),
 				),
 				vfst.TestPath("/home/user/.local/share/chezmoi/dot_dir/file",
-					vfst.TestDoesNotExist,
+					vfst.TestDoesNotExist(),
 				),
 				vfst.TestPath("/home/user/.local/share/chezmoi/dot_dir/subdir",
-					vfst.TestIsDir,
-					vfst.TestModePerm(0o777&^chezmoitest.Umask),
+					vfst.TestIsDir(),
+					vfst.TestModePerm(fs.ModePerm&^chezmoitest.Umask),
 				),
 				vfst.TestPath("/home/user/.local/share/chezmoi/dot_dir/subdir/file",
-					vfst.TestModeIsRegular,
+					vfst.TestModeIsRegular(),
 					vfst.TestModePerm(0o666&^chezmoitest.Umask),
 					vfst.TestContentsString("# contents of .dir/subdir/file\n"),
 				),
@@ -161,48 +169,65 @@ func TestSourceStateAdd(t *testing.T) {
 		},
 		{
 			name: "dir_subdir_file_existing_dir_subdir",
-			destAbsPaths: AbsPaths{
-				"/home/user/.dir/subdir/file",
+			destAbsPaths: []AbsPath{
+				NewAbsPath("/home/user/.dir/subdir/file"),
 			},
 			addOptions: AddOptions{
-				Include: NewEntryTypeSet(EntryTypesAll),
+				Filter: NewEntryTypeFilter(EntryTypesAll, EntryTypesNone),
 			},
-			extraRoot: map[string]interface{}{
-				"/home/user/.local/share/chezmoi/dot_dir/subdir": &vfst.Dir{Perm: 0o777},
+			extraRoot: map[string]any{
+				"/home/user/.local/share/chezmoi/dot_dir/subdir": &vfst.Dir{Perm: fs.ModePerm},
 			},
-			tests: []interface{}{
+			tests: []any{
 				vfst.TestPath("/home/user/.local/share/chezmoi/dot_dir/subdir/file",
-					vfst.TestModeIsRegular,
+					vfst.TestModeIsRegular(),
 					vfst.TestContentsString("# contents of .dir/subdir/file\n"),
 				),
 			},
 		},
 		{
-			name: "empty",
-			destAbsPaths: AbsPaths{
-				"/home/user/.empty",
+			name: "dir_readonly_unix",
+			destAbsPaths: []AbsPath{
+				NewAbsPath("/home/user/.readonly_dir"),
 			},
 			addOptions: AddOptions{
-				Include: NewEntryTypeSet(EntryTypesAll),
+				Filter: NewEntryTypeFilter(EntryTypesAll, EntryTypesNone),
 			},
-			tests: []interface{}{
+			extraRoot: map[string]any{
+				"/home/user/.readonly_dir": &vfst.Dir{Perm: 0o555},
+			},
+			tests: []any{
+				vfst.TestPath("/home/user/.local/share/chezmoi/readonly_dot_readonly_dir",
+					vfst.TestIsDir(),
+					vfst.TestModePerm(fs.ModePerm&^chezmoitest.Umask),
+				),
+			},
+		},
+		{
+			name: "empty",
+			destAbsPaths: []AbsPath{
+				NewAbsPath("/home/user/.empty"),
+			},
+			addOptions: AddOptions{
+				Filter: NewEntryTypeFilter(EntryTypesAll, EntryTypesNone),
+			},
+			tests: []any{
 				vfst.TestPath("/home/user/.local/share/chezmoi/dot_empty",
-					vfst.TestDoesNotExist,
+					vfst.TestDoesNotExist(),
 				),
 			},
 		},
 		{
 			name: "empty_with_empty",
-			destAbsPaths: AbsPaths{
-				"/home/user/.empty",
+			destAbsPaths: []AbsPath{
+				NewAbsPath("/home/user/.empty"),
 			},
 			addOptions: AddOptions{
-				Empty:   true,
-				Include: NewEntryTypeSet(EntryTypesAll),
+				Filter: NewEntryTypeFilter(EntryTypesAll, EntryTypesNone),
 			},
-			tests: []interface{}{
+			tests: []any{
 				vfst.TestPath("/home/user/.local/share/chezmoi/empty_dot_empty",
-					vfst.TestModeIsRegular,
+					vfst.TestModeIsRegular(),
 					vfst.TestModePerm(0o666&^chezmoitest.Umask),
 					vfst.TestContents(nil),
 				),
@@ -210,15 +235,15 @@ func TestSourceStateAdd(t *testing.T) {
 		},
 		{
 			name: "executable_unix",
-			destAbsPaths: AbsPaths{
-				"/home/user/.executable",
+			destAbsPaths: []AbsPath{
+				NewAbsPath("/home/user/.executable"),
 			},
 			addOptions: AddOptions{
-				Include: NewEntryTypeSet(EntryTypesAll),
+				Filter: NewEntryTypeFilter(EntryTypesAll, EntryTypesNone),
 			},
-			tests: []interface{}{
+			tests: []any{
 				vfst.TestPath("/home/user/.local/share/chezmoi/executable_dot_executable",
-					vfst.TestModeIsRegular,
+					vfst.TestModeIsRegular(),
 					vfst.TestModePerm(0o666&^chezmoitest.Umask),
 					vfst.TestContentsString("# contents of .executable\n"),
 				),
@@ -226,15 +251,15 @@ func TestSourceStateAdd(t *testing.T) {
 		},
 		{
 			name: "executable_windows",
-			destAbsPaths: AbsPaths{
-				"/home/user/.executable",
+			destAbsPaths: []AbsPath{
+				NewAbsPath("/home/user/.executable"),
 			},
 			addOptions: AddOptions{
-				Include: NewEntryTypeSet(EntryTypesAll),
+				Filter: NewEntryTypeFilter(EntryTypesAll, EntryTypesNone),
 			},
-			tests: []interface{}{
+			tests: []any{
 				vfst.TestPath("/home/user/.local/share/chezmoi/dot_executable",
-					vfst.TestModeIsRegular,
+					vfst.TestModeIsRegular(),
 					vfst.TestModePerm(0o666&^chezmoitest.Umask),
 					vfst.TestContentsString("# contents of .executable\n"),
 				),
@@ -242,16 +267,16 @@ func TestSourceStateAdd(t *testing.T) {
 		},
 		{
 			name: "create",
-			destAbsPaths: AbsPaths{
-				"/home/user/.create",
+			destAbsPaths: []AbsPath{
+				NewAbsPath("/home/user/.create"),
 			},
 			addOptions: AddOptions{
-				Create:  true,
-				Include: NewEntryTypeSet(EntryTypesAll),
+				Create: true,
+				Filter: NewEntryTypeFilter(EntryTypesAll, EntryTypesNone),
 			},
-			tests: []interface{}{
+			tests: []any{
 				vfst.TestPath("/home/user/.local/share/chezmoi/create_dot_create",
-					vfst.TestModeIsRegular,
+					vfst.TestModeIsRegular(),
 					vfst.TestModePerm(0o666&^chezmoitest.Umask),
 					vfst.TestContentsString("# contents of .create\n"),
 				),
@@ -259,15 +284,15 @@ func TestSourceStateAdd(t *testing.T) {
 		},
 		{
 			name: "file",
-			destAbsPaths: AbsPaths{
-				"/home/user/.file",
+			destAbsPaths: []AbsPath{
+				NewAbsPath("/home/user/.file"),
 			},
 			addOptions: AddOptions{
-				Include: NewEntryTypeSet(EntryTypesAll),
+				Filter: NewEntryTypeFilter(EntryTypesAll, EntryTypesNone),
 			},
-			tests: []interface{}{
+			tests: []any{
 				vfst.TestPath("/home/user/.local/share/chezmoi/dot_file",
-					vfst.TestModeIsRegular,
+					vfst.TestModeIsRegular(),
 					vfst.TestModePerm(0o666&^chezmoitest.Umask),
 					vfst.TestContentsString("# contents of .file\n"),
 				),
@@ -275,40 +300,40 @@ func TestSourceStateAdd(t *testing.T) {
 		},
 		{
 			name: "file_change_attributes",
-			destAbsPaths: AbsPaths{
-				"/home/user/.file",
+			destAbsPaths: []AbsPath{
+				NewAbsPath("/home/user/.file"),
 			},
 			addOptions: AddOptions{
-				Include: NewEntryTypeSet(EntryTypesAll),
+				Filter: NewEntryTypeFilter(EntryTypesAll, EntryTypesNone),
 			},
-			extraRoot: map[string]interface{}{
+			extraRoot: map[string]any{
 				"/home/user/.local/share/chezmoi/executable_dot_file": "# contents of .file\n",
 			},
-			tests: []interface{}{
+			tests: []any{
 				vfst.TestPath("/home/user/.local/share/chezmoi/dot_file",
-					vfst.TestModeIsRegular,
+					vfst.TestModeIsRegular(),
 					vfst.TestModePerm(0o666&^chezmoitest.Umask),
 					vfst.TestContentsString("# contents of .file\n"),
 				),
 				vfst.TestPath("/home/user/.local/share/chezmoi/executable_dot_file",
-					vfst.TestDoesNotExist,
+					vfst.TestDoesNotExist(),
 				),
 			},
 		},
 		{
 			name: "file_replace_contents",
-			destAbsPaths: AbsPaths{
-				"/home/user/.file",
+			destAbsPaths: []AbsPath{
+				NewAbsPath("/home/user/.file"),
 			},
 			addOptions: AddOptions{
-				Include: NewEntryTypeSet(EntryTypesAll),
+				Filter: NewEntryTypeFilter(EntryTypesAll, EntryTypesNone),
 			},
-			extraRoot: map[string]interface{}{
+			extraRoot: map[string]any{
 				"/home/user/.local/share/chezmoi/dot_file": "# old contents of .file\n",
 			},
-			tests: []interface{}{
+			tests: []any{
 				vfst.TestPath("/home/user/.local/share/chezmoi/dot_file",
-					vfst.TestModeIsRegular,
+					vfst.TestModeIsRegular(),
 					vfst.TestModePerm(0o666&^chezmoitest.Umask),
 					vfst.TestContentsString("# contents of .file\n"),
 				),
@@ -316,15 +341,15 @@ func TestSourceStateAdd(t *testing.T) {
 		},
 		{
 			name: "private_unix",
-			destAbsPaths: AbsPaths{
-				"/home/user/.private",
+			destAbsPaths: []AbsPath{
+				NewAbsPath("/home/user/.private"),
 			},
 			addOptions: AddOptions{
-				Include: NewEntryTypeSet(EntryTypesAll),
+				Filter: NewEntryTypeFilter(EntryTypesAll, EntryTypesNone),
 			},
-			tests: []interface{}{
+			tests: []any{
 				vfst.TestPath("/home/user/.local/share/chezmoi/private_dot_private",
-					vfst.TestModeIsRegular,
+					vfst.TestModeIsRegular(),
 					vfst.TestModePerm(0o666&^chezmoitest.Umask),
 					vfst.TestContentsString("# contents of .private\n"),
 				),
@@ -332,67 +357,89 @@ func TestSourceStateAdd(t *testing.T) {
 		},
 		{
 			name: "private_windows",
-			destAbsPaths: AbsPaths{
-				"/home/user/.private",
+			destAbsPaths: []AbsPath{
+				NewAbsPath("/home/user/.private"),
 			},
 			addOptions: AddOptions{
-				Include: NewEntryTypeSet(EntryTypesAll),
+				Filter: NewEntryTypeFilter(EntryTypesAll, EntryTypesNone),
 			},
-			tests: []interface{}{
+			tests: []any{
 				vfst.TestPath("/home/user/.local/share/chezmoi/dot_private",
-					vfst.TestModeIsRegular,
+					vfst.TestModeIsRegular(),
 					vfst.TestModePerm(0o666&^chezmoitest.Umask),
 					vfst.TestContentsString("# contents of .private\n"),
 				),
 			},
 		},
 		{
-			name: "symlink",
-			destAbsPaths: AbsPaths{
-				"/home/user/.symlink",
+			name: "file_readonly_unix",
+			destAbsPaths: []AbsPath{
+				NewAbsPath("/home/user/.readonly"),
 			},
 			addOptions: AddOptions{
-				Include: NewEntryTypeSet(EntryTypesAll),
+				Filter: NewEntryTypeFilter(EntryTypesAll, EntryTypesNone),
 			},
-			tests: []interface{}{
+			extraRoot: map[string]any{
+				"/home/user/.readonly": &vfst.File{
+					Perm:     0o444,
+					Contents: []byte("# contents of .readonly\n"),
+				},
+			},
+			tests: []any{
+				vfst.TestPath("/home/user/.local/share/chezmoi/readonly_dot_readonly",
+					vfst.TestModeIsRegular(),
+					vfst.TestModePerm(0o666&^chezmoitest.Umask),
+					vfst.TestContentsString("# contents of .readonly\n"),
+				),
+			},
+		},
+		{
+			name: "symlink",
+			destAbsPaths: []AbsPath{
+				NewAbsPath("/home/user/.symlink"),
+			},
+			addOptions: AddOptions{
+				Filter: NewEntryTypeFilter(EntryTypesAll, EntryTypesNone),
+			},
+			tests: []any{
 				vfst.TestPath("/home/user/.local/share/chezmoi/symlink_dot_symlink",
-					vfst.TestModeIsRegular,
+					vfst.TestModeIsRegular(),
 					vfst.TestContentsString(".dir/subdir/file\n"),
 				),
 			},
 		},
 		{
 			name: "symlink_backslash_windows",
-			destAbsPaths: AbsPaths{
-				"/home/user/.symlink_windows",
+			destAbsPaths: []AbsPath{
+				NewAbsPath("/home/user/.symlink_windows"),
 			},
 			addOptions: AddOptions{
-				Include: NewEntryTypeSet(EntryTypesAll),
+				Filter: NewEntryTypeFilter(EntryTypesAll, EntryTypesNone),
 			},
-			extraRoot: map[string]interface{}{
-				"/home/user": map[string]interface{}{
+			extraRoot: map[string]any{
+				"/home/user": map[string]any{
 					".symlink_windows": &vfst.Symlink{Target: ".dir\\subdir\\file"},
 				},
 			},
-			tests: []interface{}{
+			tests: []any{
 				vfst.TestPath("/home/user/.local/share/chezmoi/symlink_dot_symlink_windows",
-					vfst.TestModeIsRegular,
+					vfst.TestModeIsRegular(),
 					vfst.TestContentsString(".dir/subdir/file\n"),
 				),
 			},
 		},
 		{
 			name: "template",
-			destAbsPaths: AbsPaths{
-				"/home/user/.template",
+			destAbsPaths: []AbsPath{
+				NewAbsPath("/home/user/.template"),
 			},
 			addOptions: AddOptions{
 				AutoTemplate: true,
-				Include:      NewEntryTypeSet(EntryTypesAll),
+				Filter:       NewEntryTypeFilter(EntryTypesAll, EntryTypesNone),
 			},
-			tests: []interface{}{
+			tests: []any{
 				vfst.TestPath("/home/user/.local/share/chezmoi/dot_template.tmpl",
-					vfst.TestModeIsRegular,
+					vfst.TestModeIsRegular(),
 					vfst.TestModePerm(0o666&^chezmoitest.Umask),
 					vfst.TestContentsString("key = {{ .variable }}\n"),
 				),
@@ -400,20 +447,20 @@ func TestSourceStateAdd(t *testing.T) {
 		},
 		{
 			name: "dir_and_dir_file",
-			destAbsPaths: AbsPaths{
-				"/home/user/.dir",
-				"/home/user/.dir/file",
+			destAbsPaths: []AbsPath{
+				NewAbsPath("/home/user/.dir"),
+				NewAbsPath("/home/user/.dir/file"),
 			},
 			addOptions: AddOptions{
-				Include: NewEntryTypeSet(EntryTypesAll),
+				Filter: NewEntryTypeFilter(EntryTypesAll, EntryTypesNone),
 			},
-			tests: []interface{}{
+			tests: []any{
 				vfst.TestPath("/home/user/.local/share/chezmoi/dot_dir",
-					vfst.TestIsDir,
-					vfst.TestModePerm(0o777&^chezmoitest.Umask),
+					vfst.TestIsDir(),
+					vfst.TestModePerm(fs.ModePerm&^chezmoitest.Umask),
 				),
 				vfst.TestPath("/home/user/.local/share/chezmoi/dot_dir/file",
-					vfst.TestModeIsRegular,
+					vfst.TestModeIsRegular(),
 					vfst.TestModePerm(0o666&^chezmoitest.Umask),
 					vfst.TestContentsString("# contents of .dir/file\n"),
 				),
@@ -421,19 +468,46 @@ func TestSourceStateAdd(t *testing.T) {
 		},
 		{
 			name: "file_in_dir_exact_subdir",
-			destAbsPaths: AbsPaths{
-				"/home/user/.dir/subdir/file",
+			destAbsPaths: []AbsPath{
+				NewAbsPath("/home/user/.dir/subdir/file"),
 			},
 			addOptions: AddOptions{
-				Include: NewEntryTypeSet(EntryTypesAll),
+				Filter: NewEntryTypeFilter(EntryTypesAll, EntryTypesNone),
 			},
-			extraRoot: map[string]interface{}{
-				"/home/user/.local/share/chezmoi/dot_dir/exact_subdir": &vfst.Dir{Perm: 0o777},
+			extraRoot: map[string]any{
+				"/home/user/.local/share/chezmoi/dot_dir/exact_subdir": &vfst.Dir{Perm: fs.ModePerm},
 			},
-			tests: []interface{}{
+			tests: []any{
 				vfst.TestPath("/home/user/.local/share/chezmoi/dot_dir/exact_subdir/file",
-					vfst.TestModeIsRegular,
+					vfst.TestModeIsRegular(),
 					vfst.TestContentsString("# contents of .dir/subdir/file\n"),
+				),
+			},
+		},
+		{
+			name: "exact_subdir_not_exact_parent",
+			destAbsPaths: []AbsPath{
+				NewAbsPath("/home/user/.dir/subdir"),
+			},
+			addOptions: AddOptions{
+				Exact:               true,
+				ExactTargetRelPaths: chezmoiset.New(NewRelPath(".dir/subdir")),
+				Filter:              NewEntryTypeFilter(EntryTypesAll, EntryTypesNone),
+			},
+			tests: []any{
+				// Parent directory should NOT have exact_ prefix
+				vfst.TestPath("/home/user/.local/share/chezmoi/dot_dir",
+					vfst.TestIsDir(),
+					vfst.TestModePerm(fs.ModePerm&^chezmoitest.Umask),
+				),
+				// Target directory should have exact_ prefix
+				vfst.TestPath("/home/user/.local/share/chezmoi/dot_dir/exact_subdir",
+					vfst.TestIsDir(),
+					vfst.TestModePerm(fs.ModePerm&^chezmoitest.Umask),
+				),
+				// Verify that exact_dot_dir does NOT exist (parent should not be exact)
+				vfst.TestPath("/home/user/.local/share/chezmoi/exact_dot_dir",
+					vfst.TestDoesNotExist(),
 				),
 			},
 		},
@@ -441,24 +515,24 @@ func TestSourceStateAdd(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			chezmoitest.SkipUnlessGOOS(t, tc.name)
 
-			chezmoitest.WithTestFS(t, map[string]interface{}{
-				"/home/user": map[string]interface{}{
+			chezmoitest.WithTestFS(t, map[string]any{
+				"/home/user": map[string]any{
 					".create": "# contents of .create\n",
-					".dir": map[string]interface{}{
+					".dir": map[string]any{
 						"file": "# contents of .dir/file\n",
-						"subdir": map[string]interface{}{
+						"subdir": map[string]any{
 							"file": "# contents of .dir/subdir/file\n",
 						},
 					},
 					".empty": "",
 					".executable": &vfst.File{
-						Perm:     0o777,
+						Perm:     fs.ModePerm,
 						Contents: []byte("# contents of .executable\n"),
 					},
 					".file": "# contents of .file\n",
-					".local": map[string]interface{}{
-						"share": map[string]interface{}{
-							"chezmoi": &vfst.Dir{Perm: 0o777},
+					".local": map[string]any{
+						"share": map[string]any{
+							"chezmoi": &vfst.Dir{Perm: fs.ModePerm},
 						},
 					},
 					".private": &vfst.File{
@@ -468,104 +542,169 @@ func TestSourceStateAdd(t *testing.T) {
 					".symlink":  &vfst.Symlink{Target: ".dir/subdir/file"},
 					".template": "key = value\n",
 				},
-			}, func(fs vfs.FS) {
-				system := NewRealSystem(fs)
+			}, func(fileSystem vfs.FS) {
+				ctx := t.Context()
+				system := NewRealSystem(fileSystem)
 				persistentState := NewMockPersistentState()
 				if tc.extraRoot != nil {
-					require.NoError(t, vfst.NewBuilder().Build(system.UnderlyingFS(), tc.extraRoot))
+					assert.NoError(t, vfst.NewBuilder().Build(system.UnderlyingFS(), tc.extraRoot))
 				}
 
 				s := NewSourceState(
-					WithDestDir("/home/user"),
-					WithSourceDir("/home/user/.local/share/chezmoi"),
+					WithBaseSystem(system),
+					WithDestDir(NewAbsPath("/home/user")),
+					WithSourceDir(NewAbsPath("/home/user/.local/share/chezmoi")),
 					WithSystem(system),
-					withUserTemplateData(map[string]interface{}{
+					withUserTemplateData(map[string]any{
 						"variable": "value",
 					}),
 				)
-				require.NoError(t, s.Read())
+				assert.NoError(t, s.Read(ctx, nil))
 				requireEvaluateAll(t, s, system)
 
-				destAbsPathInfos := make(map[AbsPath]os.FileInfo)
+				destAbsPathInfos := make(map[AbsPath]fs.FileInfo)
 				for _, destAbsPath := range tc.destAbsPaths {
-					require.NoError(t, s.AddDestAbsPathInfos(destAbsPathInfos, system, destAbsPath, nil))
+					assert.NoError(t, s.AddDestAbsPathInfos(destAbsPathInfos, system, destAbsPath, nil))
 				}
-				require.NoError(t, s.Add(system, persistentState, system, destAbsPathInfos, &tc.addOptions))
+				assert.NoError(t, s.Add(system, persistentState, system, destAbsPathInfos, &tc.addOptions))
 
-				vfst.RunTests(t, fs, "", tc.tests...)
+				vfst.RunTests(t, fileSystem, "", tc.tests...)
 			})
 		})
 	}
 }
 
-func TestSourceStateApplyAll(t *testing.T) {
-	// FIXME script tests
-	// FIXME script template tests
+func TestSourceStateAddInExternal(t *testing.T) {
+	buffer := &bytes.Buffer{}
+	tarWriterSystem := NewTarWriterSystem(buffer, tar.Header{})
+	assert.NoError(t, tarWriterSystem.Mkdir(NewAbsPath("dir"), fs.ModePerm))
+	assert.NoError(t, tarWriterSystem.WriteFile(NewAbsPath("dir/file"), []byte("# contents of dir/file\n"), 0o666))
+	assert.NoError(t, tarWriterSystem.Close())
+	archiveData := buffer.Bytes()
 
+	httpServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, err := w.Write(archiveData)
+		assert.NoError(t, err)
+	}))
+	defer httpServer.Close()
+
+	root := map[string]any{
+		"/home/user": map[string]any{
+			".dir/file2": "# contents of .dir/file2\n",
+			".local/share/chezmoi": map[string]any{
+				".chezmoiexternal.toml": chezmoitest.JoinLines(
+					`[".dir"]`,
+					`    type = "archive"`,
+					`    url = "`+httpServer.URL+`/archive.tar"`,
+					`    stripComponents = 1`,
+				),
+				"dot_dir": &vfst.Dir{Perm: fs.ModePerm},
+			},
+		},
+	}
+
+	chezmoitest.WithTestFS(t, root, func(fileSystem vfs.FS) {
+		ctx := t.Context()
+		system := NewRealSystem(fileSystem)
+		persistentState := NewMockPersistentState()
+		s := NewSourceState(
+			WithBaseSystem(system),
+			WithCacheDir(NewAbsPath("/home/user/.cache/chezmoi")),
+			WithDestDir(NewAbsPath("/home/user")),
+			WithSourceDir(NewAbsPath("/home/user/.local/share/chezmoi")),
+			WithSystem(system),
+		)
+		assert.NoError(t, s.Read(ctx, nil))
+
+		destAbsPath := NewAbsPath("/home/user/.dir/file2")
+		fileInfo, err := system.Stat(destAbsPath)
+		assert.NoError(t, err)
+		destAbsPathInfos := map[AbsPath]fs.FileInfo{
+			destAbsPath: fileInfo,
+		}
+		assert.NoError(t, s.Add(system, persistentState, system, destAbsPathInfos, &AddOptions{
+			Filter: NewEntryTypeFilter(EntryTypesAll, EntryTypesNone),
+		}))
+
+		vfst.RunTests(t, fileSystem, "",
+			vfst.TestPath("/home/user/.local/share/chezmoi/dot_dir",
+				vfst.TestIsDir(),
+				vfst.TestModePerm(fs.ModePerm&^chezmoitest.Umask),
+			),
+			vfst.TestPath("/home/user/.local/share/chezmoi/dot_dir/file2",
+				vfst.TestModeIsRegular(),
+				vfst.TestModePerm(0o666&^chezmoitest.Umask),
+				vfst.TestContentsString("# contents of .dir/file2\n"),
+			),
+		)
+	})
+}
+
+func TestSourceStateApplyAll(t *testing.T) {
 	for _, tc := range []struct {
 		name               string
-		root               interface{}
+		root               any
 		sourceStateOptions []SourceStateOption
-		tests              []interface{}
+		tests              []any
 	}{
 		{
 			name: "empty",
-			root: map[string]interface{}{
-				"/home/user": map[string]interface{}{
-					".local/share/chezmoi": &vfst.Dir{Perm: 0o777},
+			root: map[string]any{
+				"/home/user": map[string]any{
+					".local/share/chezmoi": &vfst.Dir{Perm: fs.ModePerm},
 				},
 			},
 		},
 		{
 			name: "dir",
-			root: map[string]interface{}{
-				"/home/user": map[string]interface{}{
-					".local/share/chezmoi": map[string]interface{}{
-						"dot_dir": &vfst.Dir{Perm: 0o777},
+			root: map[string]any{
+				"/home/user": map[string]any{
+					".local/share/chezmoi": map[string]any{
+						"dot_dir": &vfst.Dir{Perm: fs.ModePerm},
 					},
 				},
 			},
-			tests: []interface{}{
+			tests: []any{
 				vfst.TestPath("/home/user/.dir",
-					vfst.TestIsDir,
-					vfst.TestModePerm(0o777&^chezmoitest.Umask),
+					vfst.TestIsDir(),
+					vfst.TestModePerm(fs.ModePerm&^chezmoitest.Umask),
 				),
 			},
 		},
 		{
 			name: "dir_exact",
-			root: map[string]interface{}{
-				"/home/user": map[string]interface{}{
-					".dir": map[string]interface{}{
+			root: map[string]any{
+				"/home/user": map[string]any{
+					".dir": map[string]any{
 						"file": "# contents of .dir/file\n",
 					},
-					".local/share/chezmoi": map[string]interface{}{
-						"exact_dot_dir": &vfst.Dir{Perm: 0o777},
+					".local/share/chezmoi": map[string]any{
+						"exact_dot_dir": &vfst.Dir{Perm: fs.ModePerm},
 					},
 				},
 			},
-			tests: []interface{}{
+			tests: []any{
 				vfst.TestPath("/home/user/.dir",
-					vfst.TestIsDir,
-					vfst.TestModePerm(0o777&^chezmoitest.Umask),
+					vfst.TestIsDir(),
+					vfst.TestModePerm(fs.ModePerm&^chezmoitest.Umask),
 				),
 				vfst.TestPath("/home/user/.dir/file",
-					vfst.TestDoesNotExist,
+					vfst.TestDoesNotExist(),
 				),
 			},
 		},
 		{
 			name: "file",
-			root: map[string]interface{}{
-				"/home/user": map[string]interface{}{
-					".local/share/chezmoi": map[string]interface{}{
+			root: map[string]any{
+				"/home/user": map[string]any{
+					".local/share/chezmoi": map[string]any{
 						"dot_file": "# contents of .file\n",
 					},
 				},
 			},
-			tests: []interface{}{
+			tests: []any{
 				vfst.TestPath("/home/user/.file",
-					vfst.TestModeIsRegular,
+					vfst.TestModeIsRegular(),
 					vfst.TestModePerm(0o666&^chezmoitest.Umask),
 					vfst.TestContentsString("# contents of .file\n"),
 				),
@@ -573,32 +712,32 @@ func TestSourceStateApplyAll(t *testing.T) {
 		},
 		{
 			name: "file_remove_empty",
-			root: map[string]interface{}{
-				"/home/user": map[string]interface{}{
+			root: map[string]any{
+				"/home/user": map[string]any{
 					".empty": "# contents of .empty\n",
-					".local/share/chezmoi": map[string]interface{}{
+					".local/share/chezmoi": map[string]any{
 						"dot_empty": "",
 					},
 				},
 			},
-			tests: []interface{}{
+			tests: []any{
 				vfst.TestPath("/home/user/.empty",
-					vfst.TestDoesNotExist,
+					vfst.TestDoesNotExist(),
 				),
 			},
 		},
 		{
 			name: "file_create_empty",
-			root: map[string]interface{}{
-				"/home/user": map[string]interface{}{
-					".local/share/chezmoi": map[string]interface{}{
+			root: map[string]any{
+				"/home/user": map[string]any{
+					".local/share/chezmoi": map[string]any{
 						"empty_dot_empty": "",
 					},
 				},
 			},
-			tests: []interface{}{
+			tests: []any{
 				vfst.TestPath("/home/user/.empty",
-					vfst.TestModeIsRegular,
+					vfst.TestModeIsRegular(),
 					vfst.TestModePerm(0o666&^chezmoitest.Umask),
 					vfst.TestContents(nil),
 				),
@@ -606,21 +745,21 @@ func TestSourceStateApplyAll(t *testing.T) {
 		},
 		{
 			name: "file_template",
-			root: map[string]interface{}{
-				"/home/user": map[string]interface{}{
-					".local/share/chezmoi": map[string]interface{}{
+			root: map[string]any{
+				"/home/user": map[string]any{
+					".local/share/chezmoi": map[string]any{
 						"dot_template.tmpl": "key = {{ .variable }}\n",
 					},
 				},
 			},
 			sourceStateOptions: []SourceStateOption{
-				withUserTemplateData(map[string]interface{}{
+				withUserTemplateData(map[string]any{
 					"variable": "value",
 				}),
 			},
-			tests: []interface{}{
+			tests: []any{
 				vfst.TestPath("/home/user/.template",
-					vfst.TestModeIsRegular,
+					vfst.TestModeIsRegular(),
 					vfst.TestModePerm(0o666&^chezmoitest.Umask),
 					vfst.TestContentsString("key = value\n"),
 				),
@@ -628,16 +767,16 @@ func TestSourceStateApplyAll(t *testing.T) {
 		},
 		{
 			name: "create",
-			root: map[string]interface{}{
-				"/home/user": map[string]interface{}{
-					".local/share/chezmoi": map[string]interface{}{
+			root: map[string]any{
+				"/home/user": map[string]any{
+					".local/share/chezmoi": map[string]any{
 						"create_dot_create": "# contents of .create\n",
 					},
 				},
 			},
-			tests: []interface{}{
+			tests: []any{
 				vfst.TestPath("/home/user/.create",
-					vfst.TestModeIsRegular,
+					vfst.TestModeIsRegular(),
 					vfst.TestModePerm(0o666&^chezmoitest.Umask),
 					vfst.TestContentsString("# contents of .create\n"),
 				),
@@ -645,17 +784,17 @@ func TestSourceStateApplyAll(t *testing.T) {
 		},
 		{
 			name: "create_no_replace",
-			root: map[string]interface{}{
-				"/home/user": map[string]interface{}{
-					".local/share/chezmoi": map[string]interface{}{
+			root: map[string]any{
+				"/home/user": map[string]any{
+					".local/share/chezmoi": map[string]any{
 						"create_dot_create": "# contents of .create\n",
 					},
 					".create": "# existing contents of .create\n",
 				},
 			},
-			tests: []interface{}{
+			tests: []any{
 				vfst.TestPath("/home/user/.create",
-					vfst.TestModeIsRegular,
+					vfst.TestModeIsRegular(),
 					vfst.TestModePerm(0o666&^chezmoitest.Umask),
 					vfst.TestContentsString("# existing contents of .create\n"),
 				),
@@ -663,57 +802,176 @@ func TestSourceStateApplyAll(t *testing.T) {
 		},
 		{
 			name: "symlink",
-			root: map[string]interface{}{
-				"/home/user": map[string]interface{}{
-					".local/share/chezmoi": map[string]interface{}{
+			root: map[string]any{
+				"/home/user": map[string]any{
+					".local/share/chezmoi": map[string]any{
 						"symlink_dot_symlink": ".dir/subdir/file\n",
 					},
 				},
 			},
-			tests: []interface{}{
+			tests: []any{
 				vfst.TestPath("/home/user/.symlink",
-					vfst.TestModeType(os.ModeSymlink),
+					vfst.TestModeType(fs.ModeSymlink),
 					vfst.TestSymlinkTarget(filepath.FromSlash(".dir/subdir/file")),
 				),
 			},
 		},
 		{
 			name: "symlink_template",
-			root: map[string]interface{}{
-				"/home/user": map[string]interface{}{
-					".local/share/chezmoi": map[string]interface{}{
+			root: map[string]any{
+				"/home/user": map[string]any{
+					".local/share/chezmoi": map[string]any{
 						"symlink_dot_symlink.tmpl": `{{ ".dir/subdir/file" }}` + "\n",
 					},
 				},
 			},
-			tests: []interface{}{
+			tests: []any{
 				vfst.TestPath("/home/user/.symlink",
-					vfst.TestModeType(os.ModeSymlink),
+					vfst.TestModeType(fs.ModeSymlink),
 					vfst.TestSymlinkTarget(filepath.FromSlash(".dir/subdir/file")),
 				),
 			},
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			chezmoitest.WithTestFS(t, tc.root, func(fs vfs.FS) {
-				system := NewRealSystem(fs)
+			chezmoitest.WithTestFS(t, tc.root, func(fileSystem vfs.FS) {
+				ctx := t.Context()
+				system := NewRealSystem(fileSystem)
 				persistentState := NewMockPersistentState()
 				sourceStateOptions := []SourceStateOption{
-					WithDestDir("/home/user"),
-					WithSourceDir("/home/user/.local/share/chezmoi"),
+					WithBaseSystem(system),
+					WithDestDir(NewAbsPath("/home/user")),
+					WithSourceDir(NewAbsPath("/home/user/.local/share/chezmoi")),
 					WithSystem(system),
 				}
 				sourceStateOptions = append(sourceStateOptions, tc.sourceStateOptions...)
 				s := NewSourceState(sourceStateOptions...)
-				require.NoError(t, s.Read())
+				assert.NoError(t, s.Read(ctx, nil))
 				requireEvaluateAll(t, s, system)
-				require.NoError(t, s.applyAll(system, system, persistentState, "/home/user", ApplyOptions{
-					Include: NewEntryTypeSet(EntryTypesAll),
-					Umask:   chezmoitest.Umask,
-				}))
+				err := s.applyAll(system, system, persistentState, NewAbsPath("/home/user"), ApplyOptions{
+					Filter: NewEntryTypeFilter(EntryTypesAll, EntryTypesNone),
+					Umask:  chezmoitest.Umask,
+				})
+				assert.NoError(t, err)
 
-				vfst.RunTests(t, fs, "", tc.tests...)
+				vfst.RunTests(t, fileSystem, "", tc.tests...)
 			})
+		})
+	}
+}
+
+func TestSourceStateExecuteTemplateData(t *testing.T) {
+	for _, tc := range []struct {
+		name        string
+		dataStr     string
+		expectedStr string
+	}{
+		{
+			name: "line_ending_lf",
+			dataStr: "" +
+				"unix\n" +
+				"\n" +
+				"windows\r\n" +
+				"\r\n" +
+				"# chezmoi:template:line-ending=lf\n",
+			expectedStr: chezmoitest.JoinLines(
+				"unix",
+				"",
+				"windows",
+				"",
+			),
+		},
+		{
+			name: "line_endings_lf",
+			dataStr: "" +
+				"unix\n" +
+				"\n" +
+				"windows\r\n" +
+				"\r\n" +
+				"# chezmoi:template:line-endings=lf\n",
+			expectedStr: chezmoitest.JoinLines(
+				"unix",
+				"",
+				"windows",
+				"",
+			),
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			s := NewSourceState()
+			actual, err := s.ExecuteTemplateData(ExecuteTemplateDataOptions{
+				NameRelPath: NewRelPath(tc.name),
+				Data:        []byte(tc.dataStr),
+			})
+			assert.NoError(t, err)
+			assert.Equal(t, tc.expectedStr, string(actual))
+		})
+	}
+}
+
+func TestReadSourceFileAndApplyTemplate(t *testing.T) {
+	readErr := errors.New("read error")
+
+	for _, tc := range []struct {
+		name              string
+		fileSourceRelPath string
+		fileAttr          FileAttr
+		contents          string
+		readErr           error
+		expectedStr       string
+		expectErr         bool
+	}{
+		{
+			name:              "not_template",
+			fileSourceRelPath: "dot_file",
+			contents:          "hello {{ /* this is not a template file */ }} world\n",
+			expectedStr:       "hello {{ /* this is not a template file */ }} world\n",
+		},
+		{
+			name:              "template",
+			fileSourceRelPath: "dot_file.tmpl",
+			fileAttr:          FileAttr{Template: true},
+			contents: "" +
+				"templated file\n" +
+				"source: {{ .chezmoi.sourceFile }}\n" +
+				"target: {{ .chezmoi.targetFile }}\n",
+			expectedStr: "" +
+				"templated file\n" +
+				"source: dot_file.tmpl\n" +
+				"target: /home/user/.file\n",
+		},
+		{
+			name:      "read_error",
+			readErr:   readErr,
+			expectErr: true,
+		},
+		{
+			name:              "template_error",
+			fileSourceRelPath: "dot_file.tmpl",
+			fileAttr:          FileAttr{Template: true},
+			contents:          "{{",
+			expectErr:         true,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			s := NewSourceState(withUserTemplateData(map[string]any{
+				"chezmoi": map[string]any{},
+			}))
+			actual, err := s.readContentsAndExecuteTemplate(
+				func() ([]byte, error) {
+					return []byte(tc.contents), tc.readErr
+				},
+				tc.fileAttr,
+				NewSourceRelPath(tc.fileSourceRelPath),
+				NewAbsPath("/home/user/.file"),
+			)
+
+			if tc.expectErr {
+				assert.Error(t, err)
+				return
+			}
+			assert.NoError(t, err)
+			assert.Equal(t, tc.expectedStr, string(actual))
 		})
 	}
 }
@@ -721,33 +979,36 @@ func TestSourceStateApplyAll(t *testing.T) {
 func TestSourceStateRead(t *testing.T) {
 	for _, tc := range []struct {
 		name                string
-		root                interface{}
+		root                any
 		expectedError       string
 		expectedSourceState *SourceState
 	}{
 		{
 			name: "empty",
-			root: map[string]interface{}{
-				"/home/user/.local/share/chezmoi": &vfst.Dir{Perm: 0o777},
+			root: map[string]any{
+				"/home/user/.local/share/chezmoi": &vfst.Dir{Perm: fs.ModePerm},
 			},
 			expectedSourceState: NewSourceState(),
 		},
 		{
 			name: "dir",
-			root: map[string]interface{}{
-				"/home/user/.local/share/chezmoi": map[string]interface{}{
-					"dir": &vfst.Dir{Perm: 0o777},
+			root: map[string]any{
+				"/home/user/.local/share/chezmoi": map[string]any{
+					"dir": &vfst.Dir{
+						Perm: fs.ModePerm &^ chezmoitest.Umask,
+					},
 				},
 			},
 			expectedSourceState: NewSourceState(
 				withEntries(map[RelPath]SourceStateEntry{
-					"dir": &SourceStateDir{
+					NewRelPath("dir"): &SourceStateDir{
+						origin:        SourceStateOriginAbsPath(NewAbsPath("/home/user/.local/share/chezmoi/dir")),
 						sourceRelPath: NewSourceRelDirPath("dir"),
-						Attr: DirAttr{
+						attr: DirAttr{
 							TargetName: "dir",
 						},
 						targetStateEntry: &TargetStateDir{
-							perm: 0o777,
+							perm: fs.ModePerm &^ chezmoitest.Umask,
 						},
 					},
 				}),
@@ -755,23 +1016,26 @@ func TestSourceStateRead(t *testing.T) {
 		},
 		{
 			name: "file",
-			root: map[string]interface{}{
-				"/home/user/.local/share/chezmoi": map[string]interface{}{
+			root: map[string]any{
+				"/home/user/.local/share/chezmoi": map[string]any{
 					"dot_file": "# contents of .file\n",
 				},
 			},
 			expectedSourceState: NewSourceState(
 				withEntries(map[RelPath]SourceStateEntry{
-					".file": &SourceStateFile{
+					NewRelPath(".file"): &SourceStateFile{
+						origin:        SourceStateOriginAbsPath(NewAbsPath("/home/user/.local/share/chezmoi/dot_file")),
 						sourceRelPath: NewSourceRelPath("dot_file"),
-						Attr: FileAttr{
+						attr: FileAttr{
 							TargetName: ".file",
 							Type:       SourceFileTypeFile,
 						},
-						lazyContents: newLazyContents([]byte("# contents of .file\n")),
+						contentsFunc:       eagerNoErr([]byte("# contents of .file\n")),
+						contentsSHA256Func: eagerNoErr(sha256.Sum256([]byte("# contents of .file\n"))),
 						targetStateEntry: &TargetStateFile{
-							perm:         0o666,
-							lazyContents: newLazyContents([]byte("# contents of .file\n")),
+							contentsFunc:       eagerNoErr([]byte("# contents of .file\n")),
+							contentsSHA256Func: eagerNoErr(sha256.Sum256([]byte("# contents of .file\n"))),
+							perm:               0o666 &^ chezmoitest.Umask,
 						},
 					},
 				}),
@@ -779,55 +1043,62 @@ func TestSourceStateRead(t *testing.T) {
 		},
 		{
 			name: "duplicate_target_file",
-			root: map[string]interface{}{
-				"/home/user/.local/share/chezmoi": map[string]interface{}{
+			root: map[string]any{
+				"/home/user/.local/share/chezmoi": map[string]any{
 					"dot_file":      "# contents of .file\n",
 					"dot_file.tmpl": "# contents of .file\n",
 				},
 			},
-			expectedError: ".file: duplicate source state entries (dot_file, dot_file.tmpl)",
+			expectedError: ".file: inconsistent state (/home/user/.local/share/chezmoi/dot_file, /home/user/.local/share/chezmoi/dot_file.tmpl)",
 		},
 		{
 			name: "duplicate_target_dir",
-			root: map[string]interface{}{
-				"/home/user/.local/share/chezmoi": map[string]interface{}{
-					"dir":       &vfst.Dir{Perm: 0o777},
-					"exact_dir": &vfst.Dir{Perm: 0o777},
+			root: map[string]any{
+				"/home/user/.local/share/chezmoi": map[string]any{
+					"dir": &vfst.Dir{
+						Perm: fs.ModePerm &^ chezmoitest.Umask,
+					},
+					"exact_dir": &vfst.Dir{
+						Perm: fs.ModePerm &^ chezmoitest.Umask,
+					},
 				},
 			},
-			expectedError: "dir: duplicate source state entries (dir, exact_dir)",
+			expectedError: "dir: inconsistent state (/home/user/.local/share/chezmoi/dir, /home/user/.local/share/chezmoi/exact_dir)",
 		},
 		{
 			name: "duplicate_target_script",
-			root: map[string]interface{}{
-				"/home/user/.local/share/chezmoi": map[string]interface{}{
+			root: map[string]any{
+				"/home/user/.local/share/chezmoi": map[string]any{
 					"run_script":      "#!/bin/sh\n",
 					"run_once_script": "#!/bin/sh\n",
 				},
 			},
-			expectedError: "script: duplicate source state entries (run_once_script, run_script)",
+			expectedError: "script: inconsistent state (/home/user/.local/share/chezmoi/run_once_script, /home/user/.local/share/chezmoi/run_script)",
 		},
 		{
 			name: "symlink_with_attr",
-			root: map[string]interface{}{
-				"/home/user/.local/share/chezmoi": map[string]interface{}{
+			root: map[string]any{
+				"/home/user/.local/share/chezmoi": map[string]any{
 					".file":               "# contents of .file\n",
 					"executable_dot_file": &vfst.Symlink{Target: ".file"},
 				},
 			},
 			expectedSourceState: NewSourceState(
 				withEntries(map[RelPath]SourceStateEntry{
-					".file": &SourceStateFile{
+					NewRelPath(".file"): &SourceStateFile{
+						origin:        SourceStateOriginAbsPath(NewAbsPath("/home/user/.local/share/chezmoi/executable_dot_file")),
 						sourceRelPath: NewSourceRelPath("executable_dot_file"),
-						Attr: FileAttr{
+						attr: FileAttr{
 							TargetName: ".file",
 							Type:       SourceFileTypeFile,
 							Executable: true,
 						},
-						lazyContents: newLazyContents([]byte("# contents of .file\n")),
+						contentsFunc:       eagerNoErr([]byte("# contents of .file\n")),
+						contentsSHA256Func: eagerNoErr(sha256.Sum256([]byte("# contents of .file\n"))),
 						targetStateEntry: &TargetStateFile{
-							perm:         0o777,
-							lazyContents: newLazyContents([]byte("# contents of .file\n")),
+							contentsFunc:       eagerNoErr([]byte("# contents of .file\n")),
+							contentsSHA256Func: eagerNoErr(sha256.Sum256([]byte("# contents of .file\n"))),
+							perm:               fs.ModePerm &^ chezmoitest.Umask,
 						},
 					},
 				}),
@@ -835,24 +1106,33 @@ func TestSourceStateRead(t *testing.T) {
 		},
 		{
 			name: "symlink_script",
-			root: map[string]interface{}{
-				"/home/user/.local/share/chezmoi": map[string]interface{}{
+			root: map[string]any{
+				"/home/user/.local/share/chezmoi": map[string]any{
 					".script":    "# contents of .script\n",
 					"run_script": &vfst.Symlink{Target: ".script"},
 				},
 			},
 			expectedSourceState: NewSourceState(
 				withEntries(map[RelPath]SourceStateEntry{
-					"script": &SourceStateFile{
+					NewRelPath("script"): &SourceStateFile{
+						origin:        SourceStateOriginAbsPath(NewAbsPath("/home/user/.local/share/chezmoi/run_script")),
 						sourceRelPath: NewSourceRelPath("run_script"),
-						Attr: FileAttr{
+						attr: FileAttr{
 							TargetName: "script",
 							Type:       SourceFileTypeScript,
+							Condition:  ScriptConditionAlways,
 						},
-						lazyContents: newLazyContents([]byte("# contents of .script\n")),
+						contentsFunc:       eagerNoErr([]byte("# contents of .script\n")),
+						contentsSHA256Func: eagerNoErr(sha256.Sum256([]byte("# contents of .script\n"))),
 						targetStateEntry: &TargetStateScript{
-							name:         "script",
-							lazyContents: newLazyContents([]byte("# contents of .script\n")),
+							name:               NewRelPath("script"),
+							contentsFunc:       eagerNoErr([]byte("# contents of .script\n")),
+							contentsSHA256Func: eagerNoErr(sha256.Sum256([]byte("# contents of .script\n"))),
+							condition:          ScriptConditionAlways,
+							sourceAttr: SourceAttr{
+								Condition: ScriptConditionAlways,
+							},
+							sourceRelPath: NewSourceRelPath("run_script"),
 						},
 					},
 				}),
@@ -860,23 +1140,32 @@ func TestSourceStateRead(t *testing.T) {
 		},
 		{
 			name: "script",
-			root: map[string]interface{}{
-				"/home/user/.local/share/chezmoi": map[string]interface{}{
+			root: map[string]any{
+				"/home/user/.local/share/chezmoi": map[string]any{
 					"run_script": "# contents of script\n",
 				},
 			},
 			expectedSourceState: NewSourceState(
 				withEntries(map[RelPath]SourceStateEntry{
-					"script": &SourceStateFile{
+					NewRelPath("script"): &SourceStateFile{
+						origin:        SourceStateOriginAbsPath(NewAbsPath("/home/user/.local/share/chezmoi/run_script")),
 						sourceRelPath: NewSourceRelPath("run_script"),
-						Attr: FileAttr{
+						attr: FileAttr{
 							TargetName: "script",
 							Type:       SourceFileTypeScript,
+							Condition:  ScriptConditionAlways,
 						},
-						lazyContents: newLazyContents([]byte("# contents of script\n")),
+						contentsFunc:       eagerNoErr([]byte("# contents of script\n")),
+						contentsSHA256Func: eagerNoErr(sha256.Sum256([]byte("# contents of script\n"))),
 						targetStateEntry: &TargetStateScript{
-							name:         "script",
-							lazyContents: newLazyContents([]byte("# contents of script\n")),
+							name:               NewRelPath("script"),
+							contentsFunc:       eagerNoErr([]byte("# contents of script\n")),
+							contentsSHA256Func: eagerNoErr(sha256.Sum256([]byte("# contents of script\n"))),
+							condition:          ScriptConditionAlways,
+							sourceAttr: SourceAttr{
+								Condition: ScriptConditionAlways,
+							},
+							sourceRelPath: NewSourceRelPath("run_script"),
 						},
 					},
 				}),
@@ -884,22 +1173,24 @@ func TestSourceStateRead(t *testing.T) {
 		},
 		{
 			name: "symlink",
-			root: map[string]interface{}{
-				"/home/user/.local/share/chezmoi": map[string]interface{}{
+			root: map[string]any{
+				"/home/user/.local/share/chezmoi": map[string]any{
 					"symlink_dot_symlink": ".dir/subdir/file",
 				},
 			},
 			expectedSourceState: NewSourceState(
 				withEntries(map[RelPath]SourceStateEntry{
-					".symlink": &SourceStateFile{
+					NewRelPath(".symlink"): &SourceStateFile{
+						origin:        SourceStateOriginAbsPath(NewAbsPath("/home/user/.local/share/chezmoi/symlink_dot_symlink")),
 						sourceRelPath: NewSourceRelPath("symlink_dot_symlink"),
-						Attr: FileAttr{
+						attr: FileAttr{
 							TargetName: ".symlink",
 							Type:       SourceFileTypeSymlink,
 						},
-						lazyContents: newLazyContents([]byte(".dir/subdir/file")),
+						contentsFunc:       eagerNoErr([]byte(".dir/subdir/file")),
+						contentsSHA256Func: eagerNoErr(sha256.Sum256([]byte(".dir/subdir/file"))),
 						targetStateEntry: &TargetStateSymlink{
-							lazyLinkname: newLazyLinkname(".dir/subdir/file"),
+							linknameFunc: eagerNoErr(".dir/subdir/file"),
 						},
 					},
 				}),
@@ -907,38 +1198,38 @@ func TestSourceStateRead(t *testing.T) {
 		},
 		{
 			name: "file_in_dir",
-			root: map[string]interface{}{
-				"/home/user/.local/share/chezmoi": map[string]interface{}{
-					"dir": map[string]interface{}{
+			root: map[string]any{
+				"/home/user/.local/share/chezmoi": map[string]any{
+					"dir": map[string]any{
 						"file": "# contents of .dir/file\n",
 					},
 				},
 			},
 			expectedSourceState: NewSourceState(
 				withEntries(map[RelPath]SourceStateEntry{
-					"dir": &SourceStateDir{
+					NewRelPath("dir"): &SourceStateDir{
+						origin:        SourceStateOriginAbsPath(NewAbsPath("/home/user/.local/share/chezmoi/dir")),
 						sourceRelPath: NewSourceRelDirPath("dir"),
-						Attr: DirAttr{
+						attr: DirAttr{
 							TargetName: "dir",
 						},
 						targetStateEntry: &TargetStateDir{
-							perm: 0o777,
+							perm: fs.ModePerm &^ chezmoitest.Umask,
 						},
 					},
-					"dir/file": &SourceStateFile{
+					NewRelPath("dir/file"): &SourceStateFile{
+						origin:        SourceStateOriginAbsPath(NewAbsPath("/home/user/.local/share/chezmoi/dir/file")),
 						sourceRelPath: NewSourceRelPath("dir/file"),
-						Attr: FileAttr{
+						attr: FileAttr{
 							TargetName: "file",
 							Type:       SourceFileTypeFile,
 						},
-						lazyContents: &lazyContents{
-							contents: []byte("# contents of .dir/file\n"),
-						},
+						contentsFunc:       eagerNoErr([]byte("# contents of .dir/file\n")),
+						contentsSHA256Func: eagerNoErr(sha256.Sum256([]byte("# contents of .dir/file\n"))),
 						targetStateEntry: &TargetStateFile{
-							perm: 0o666,
-							lazyContents: &lazyContents{
-								contents: []byte("# contents of .dir/file\n"),
-							},
+							contentsFunc:       eagerNoErr([]byte("# contents of .dir/file\n")),
+							contentsSHA256Func: eagerNoErr(sha256.Sum256([]byte("# contents of .dir/file\n"))),
+							perm:               0o666 &^ chezmoitest.Umask,
 						},
 					},
 				}),
@@ -946,200 +1237,361 @@ func TestSourceStateRead(t *testing.T) {
 		},
 		{
 			name: "chezmoiignore",
-			root: map[string]interface{}{
-				"/home/user/.local/share/chezmoi": map[string]interface{}{
+			root: map[string]any{
+				"/home/user/.local/share/chezmoi": map[string]any{
 					".chezmoiignore": "README.md\n",
 				},
 			},
 			expectedSourceState: NewSourceState(
 				withIgnore(
-					mustNewPatternSet(t, map[string]bool{
-						"README.md": true,
+					mustNewPatternSet(t, map[string]PatternSetIncludeType{
+						"README.md": PatternSetInclude,
 					}),
 				),
 			),
 		},
 		{
 			name: "chezmoiignore_ignore_file",
-			root: map[string]interface{}{
-				"/home/user/.local/share/chezmoi": map[string]interface{}{
+			root: map[string]any{
+				"/home/user/.local/share/chezmoi": map[string]any{
 					".chezmoiignore": "README.md\n",
 					"README.md":      "",
 				},
 			},
 			expectedSourceState: NewSourceState(
 				withIgnore(
-					mustNewPatternSet(t, map[string]bool{
-						"README.md": true,
+					mustNewPatternSet(t, map[string]PatternSetIncludeType{
+						"README.md": PatternSetInclude,
 					}),
+				),
+				withIgnoredRelPathStrs(
+					"README.md",
+				),
+			),
+		},
+		{
+			name: "chezmoiignore_ignore_file_with_hash",
+			root: map[string]any{
+				"/home/user/.local/share/chezmoi": map[string]any{
+					".chezmoiignore": "README.md#\n",
+					"README.md#":     "",
+				},
+			},
+			expectedSourceState: NewSourceState(
+				withIgnore(
+					mustNewPatternSet(t, map[string]PatternSetIncludeType{
+						"README.md#": PatternSetInclude,
+					}),
+				),
+				withIgnoredRelPathStrs(
+					"README.md#",
 				),
 			),
 		},
 		{
 			name: "chezmoiignore_exact_dir",
-			root: map[string]interface{}{
-				"/home/user/dir": map[string]interface{}{
+			root: map[string]any{
+				"/home/user/dir": map[string]any{
 					"file1": "# contents of dir/file1\n",
 					"file2": "# contents of dir/file2\n",
 					"file3": "# contents of dir/file3\n",
 				},
-				"/home/user/.local/share/chezmoi": map[string]interface{}{
+				"/home/user/.local/share/chezmoi": map[string]any{
 					".chezmoiignore": "dir/file3\n",
-					"exact_dir": map[string]interface{}{
+					"exact_dir": map[string]any{
 						"file1": "# contents of dir/file1\n",
 					},
 				},
 			},
 			expectedSourceState: NewSourceState(
 				withEntries(map[RelPath]SourceStateEntry{
-					"dir": &SourceStateDir{
+					NewRelPath("dir"): &SourceStateDir{
+						origin:        SourceStateOriginAbsPath(NewAbsPath("/home/user/.local/share/chezmoi/exact_dir")),
 						sourceRelPath: NewSourceRelDirPath("exact_dir"),
-						Attr: DirAttr{
+						attr: DirAttr{
 							TargetName: "dir",
 							Exact:      true,
 						},
 						targetStateEntry: &TargetStateDir{
-							perm: 0o777,
+							perm: fs.ModePerm &^ chezmoitest.Umask,
 						},
 					},
-					"dir/file1": &SourceStateFile{
+					NewRelPath("dir/file1"): &SourceStateFile{
+						origin:        SourceStateOriginAbsPath(NewAbsPath("/home/user/.local/share/chezmoi/exact_dir/file1")),
 						sourceRelPath: NewSourceRelPath("exact_dir/file1"),
-						Attr: FileAttr{
+						attr: FileAttr{
 							TargetName: "file1",
 							Type:       SourceFileTypeFile,
 						},
-						lazyContents: &lazyContents{
-							contents: []byte("# contents of dir/file1\n"),
-						},
+						contentsFunc:       eagerNoErr([]byte("# contents of dir/file1\n")),
+						contentsSHA256Func: eagerNoErr(sha256.Sum256([]byte("# contents of dir/file1\n"))),
 						targetStateEntry: &TargetStateFile{
-							perm: 0o666,
-							lazyContents: &lazyContents{
-								contents: []byte("# contents of dir/file1\n"),
-							},
+							contentsFunc:       eagerNoErr([]byte("# contents of dir/file1\n")),
+							contentsSHA256Func: eagerNoErr(sha256.Sum256([]byte("# contents of dir/file1\n"))),
+							perm:               0o666 &^ chezmoitest.Umask,
 						},
 					},
-					"dir/file2": &SourceStateRemove{
-						targetRelPath: "dir/file2",
+					NewRelPath("dir/file2"): &SourceStateAbsent{
+						origin:        SourceStateOriginAbsPath(NewAbsPath("/home/user/.local/share/chezmoi/exact_dir")),
+						sourceRelPath: NewSourceRelDirPath("exact_dir"),
+						targetRelPath: NewRelPath("dir/file2"),
 					},
 				}),
 				withIgnore(
-					mustNewPatternSet(t, map[string]bool{
-						"dir/file3": true,
+					mustNewPatternSet(t, map[string]PatternSetIncludeType{
+						"dir/file3": PatternSetInclude,
 					}),
+				),
+				withIgnoredRelPathStrs(
+					"dir/file3",
 				),
 			),
 		},
 		{
 			name: "chezmoiremove",
-			root: map[string]interface{}{
+			root: map[string]any{
 				"/home/user/file": "",
-				"/home/user/.local/share/chezmoi": map[string]interface{}{
+				"/home/user/.local/share/chezmoi": map[string]any{
 					".chezmoiremove": "file\n",
 				},
 			},
 			expectedSourceState: NewSourceState(
 				withEntries(map[RelPath]SourceStateEntry{
-					"file": &SourceStateRemove{
-						targetRelPath: "file",
+					NewRelPath("file"): &SourceStateAbsent{
+						origin:        SourceStateOriginRemove{},
+						sourceRelPath: NewSourceRelPath(".chezmoiremove"),
+						targetRelPath: NewRelPath("file"),
 					},
 				}),
+				withRemove(
+					mustNewPatternSet(t, map[string]PatternSetIncludeType{
+						"file": PatternSetInclude,
+					}),
+				),
 			),
 		},
 		{
 			name: "chezmoiremove_and_ignore",
-			root: map[string]interface{}{
-				"/home/user": map[string]interface{}{
+			root: map[string]any{
+				"/home/user": map[string]any{
 					"file1": "",
 					"file2": "",
 				},
-				"/home/user/.local/share/chezmoi": map[string]interface{}{
+				"/home/user/.local/share/chezmoi": map[string]any{
 					".chezmoiignore": "file2\n",
 					".chezmoiremove": "file*\n",
 				},
 			},
 			expectedSourceState: NewSourceState(
 				withEntries(map[RelPath]SourceStateEntry{
-					"file1": &SourceStateRemove{
-						targetRelPath: "file1",
+					NewRelPath("file1"): &SourceStateAbsent{
+						origin:        SourceStateOriginRemove{},
+						sourceRelPath: NewSourceRelPath(".chezmoiremove"),
+						targetRelPath: NewRelPath("file1"),
 					},
 				}),
 				withIgnore(
-					mustNewPatternSet(t, map[string]bool{
-						"file2": true,
+					mustNewPatternSet(t, map[string]PatternSetIncludeType{
+						"file2": PatternSetInclude,
+					}),
+				),
+				withIgnoredRelPathStrs(
+					"file2",
+				),
+				withRemove(
+					mustNewPatternSet(t, map[string]PatternSetIncludeType{
+						"file*": PatternSetInclude,
 					}),
 				),
 			),
 		},
 		{
+			name: "chezmoiremove_and_ignore_in_subdir",
+			root: map[string]any{
+				"/home/user": map[string]any{
+					"dir": map[string]any{
+						"file1": "",
+						"file2": "",
+					},
+				},
+				"/home/user/.local/share/chezmoi": map[string]any{
+					"dir/.chezmoiignore": "file2\n",
+					"dir/.chezmoiremove": "file*\n",
+				},
+			},
+			expectedSourceState: NewSourceState(
+				withEntries(map[RelPath]SourceStateEntry{
+					NewRelPath("dir"): &SourceStateDir{
+						origin:        SourceStateOriginAbsPath(NewAbsPath("/home/user/.local/share/chezmoi/dir")),
+						sourceRelPath: NewSourceRelDirPath("dir"),
+						attr: DirAttr{
+							TargetName: "dir",
+						},
+						targetStateEntry: &TargetStateDir{
+							perm: fs.ModePerm &^ chezmoitest.Umask,
+						},
+					},
+					NewRelPath("dir/file1"): &SourceStateAbsent{
+						origin:        SourceStateOriginRemove{},
+						sourceRelPath: NewSourceRelPath(".chezmoiremove"),
+						targetRelPath: NewRelPath("dir/file1"),
+					},
+				}),
+				withIgnore(
+					mustNewPatternSet(t, map[string]PatternSetIncludeType{
+						"dir/file2": PatternSetInclude,
+					}),
+				),
+				withIgnoredRelPathStrs(
+					"dir/file2",
+				),
+				withRemove(
+					mustNewPatternSet(t, map[string]PatternSetIncludeType{
+						"dir/file*": PatternSetInclude,
+					}),
+				),
+			),
+		},
+		{
+			name: "external",
+			root: map[string]any{
+				"/home/user/.local/share/chezmoi": map[string]any{
+					"external_dir": map[string]any{
+						"dot_file": "# contents of dir/dot_file\n",
+						"subdir": map[string]any{
+							"empty_file": "",
+						},
+						"symlink": &vfst.Symlink{Target: "dot_file"},
+					},
+				},
+			},
+			expectedSourceState: NewSourceState(
+				withEntries(map[RelPath]SourceStateEntry{
+					NewRelPath("dir"): &SourceStateDir{
+						origin:        SourceStateOriginAbsPath(NewAbsPath("/home/user/.local/share/chezmoi/external_dir")),
+						sourceRelPath: NewSourceRelDirPath("external_dir"),
+						attr: DirAttr{
+							TargetName: "dir",
+							External:   true,
+						},
+						targetStateEntry: &TargetStateDir{
+							perm: fs.ModePerm &^ chezmoitest.Umask,
+						},
+					},
+					NewRelPath("dir/dot_file"): &SourceStateFile{
+						origin:        SourceStateOriginAbsPath(NewAbsPath("/home/user/.local/share/chezmoi/external_dir/dot_file")),
+						sourceRelPath: NewSourceRelPath("external_dir/dot_file"),
+						attr: FileAttr{
+							TargetName: "dot_file",
+							Type:       SourceFileTypeFile,
+							Empty:      true,
+						},
+						contentsFunc:       eagerNoErr([]byte("# contents of dir/dot_file\n")),
+						contentsSHA256Func: eagerNoErr(sha256.Sum256([]byte("# contents of dir/dot_file\n"))),
+						targetStateEntry: &TargetStateFile{
+							contentsFunc:       eagerNoErr([]byte("# contents of dir/dot_file\n")),
+							contentsSHA256Func: eagerNoErr(sha256.Sum256([]byte("# contents of dir/dot_file\n"))),
+							empty:              true,
+							perm:               0o666 &^ chezmoitest.Umask,
+						},
+					},
+					NewRelPath("dir/subdir"): &SourceStateDir{
+						origin:        SourceStateOriginAbsPath(NewAbsPath("/home/user/.local/share/chezmoi/external_dir/subdir")),
+						sourceRelPath: NewSourceRelDirPath("external_dir/subdir"),
+						attr: DirAttr{
+							TargetName: "subdir",
+							Exact:      true,
+						},
+						targetStateEntry: &TargetStateDir{
+							perm: fs.ModePerm &^ chezmoitest.Umask,
+						},
+					},
+					NewRelPath("dir/subdir/empty_file"): &SourceStateFile{
+						origin:        SourceStateOriginAbsPath(NewAbsPath("/home/user/.local/share/chezmoi/external_dir/subdir/empty_file")),
+						sourceRelPath: NewSourceRelPath("external_dir/subdir/empty_file"),
+						attr: FileAttr{
+							TargetName: "empty_file",
+							Type:       SourceFileTypeFile,
+							Empty:      true,
+						},
+						contentsFunc:       eagerNoErr([]byte{}),
+						contentsSHA256Func: eagerNoErr(sha256.Sum256(nil)),
+						targetStateEntry: &TargetStateFile{
+							empty:              true,
+							perm:               0o666 &^ chezmoitest.Umask,
+							contentsFunc:       eagerZeroNoErr[[]byte](),
+							contentsSHA256Func: eagerNoErr(sha256.Sum256(nil)),
+						},
+					},
+					NewRelPath("dir/symlink"): &SourceStateFile{
+						origin:        SourceStateOriginAbsPath(NewAbsPath("/home/user/.local/share/chezmoi/external_dir/symlink")),
+						sourceRelPath: NewSourceRelPath("external_dir/symlink"),
+						attr: FileAttr{
+							TargetName: "symlink",
+							Type:       SourceFileTypeFile,
+						},
+						contentsFunc:       eagerNoErr([]byte("dot_file")),
+						contentsSHA256Func: eagerNoErr(sha256.Sum256([]byte("dot_file"))),
+						targetStateEntry: &TargetStateSymlink{
+							linknameFunc: eagerNoErr("dot_file"),
+						},
+					},
+				}),
+			),
+		},
+		{
 			name: "chezmoitemplates",
-			root: map[string]interface{}{
-				"/home/user/.local/share/chezmoi": map[string]interface{}{
-					".chezmoitemplates": map[string]interface{}{
+			root: map[string]any{
+				"/home/user/.local/share/chezmoi": map[string]any{
+					".chezmoitemplates": map[string]any{
 						"template": "# contents of .chezmoitemplates/template\n",
 					},
 				},
 			},
 			expectedSourceState: NewSourceState(
 				withTemplates(
-					map[string]*template.Template{
-						"template": template.Must(template.New("template").Option("missingkey=error").Parse("# contents of .chezmoitemplates/template\n")),
+					map[string]*Template{
+						"template": {
+							name: "template",
+							template: template.Must(
+								template.New("template").
+									Option("missingkey=error").
+									Parse("# contents of .chezmoitemplates/template\n"),
+							),
+							options: TemplateOptions{
+								Options: []string{"missingkey=error"},
+							},
+						},
 					},
 				),
 			),
 		},
 		{
 			name: "chezmoiversion",
-			root: map[string]interface{}{
-				"/home/user/.local/share/chezmoi": map[string]interface{}{
+			root: map[string]any{
+				"/home/user/.local/share/chezmoi": map[string]any{
 					".chezmoiversion": "1.2.3\n",
 				},
 			},
-			expectedSourceState: NewSourceState(
-				withMinVersion(
-					semver.Version{
-						Major: 1,
-						Minor: 2,
-						Patch: 3,
-					},
-				),
-			),
+			expectedSourceState: NewSourceState(),
 		},
 		{
 			name: "chezmoiversion_multiple",
-			root: map[string]interface{}{
-				"/home/user/.local/share/chezmoi": map[string]interface{}{
+			root: map[string]any{
+				"/home/user/.local/share/chezmoi": map[string]any{
 					".chezmoiversion": "1.2.3\n",
-					"dir": map[string]interface{}{
+					"dir": map[string]any{
 						".chezmoiversion": "2.3.4\n",
 					},
 				},
 			},
-			expectedSourceState: NewSourceState(
-				withEntries(map[RelPath]SourceStateEntry{
-					"dir": &SourceStateDir{
-						sourceRelPath: NewSourceRelDirPath("dir"),
-						Attr: DirAttr{
-							TargetName: "dir",
-						},
-						targetStateEntry: &TargetStateDir{
-							perm: 0o777,
-						},
-					},
-				}),
-				withMinVersion(
-					semver.Version{
-						Major: 2,
-						Minor: 3,
-						Patch: 4,
-					},
-				),
-			),
+			expectedError: "source state requires chezmoi version 2.3.4 or later, chezmoi is version 1.2.3",
 		},
 		{
 			name: "ignore_dir",
-			root: map[string]interface{}{
-				"/home/user/.local/share/chezmoi": map[string]interface{}{
-					".dir": map[string]interface{}{
+			root: map[string]any{
+				"/home/user/.local/share/chezmoi": map[string]any{
+					".dir": map[string]any{
 						"file": "# contents of .dir/file\n",
 					},
 				},
@@ -1148,8 +1600,8 @@ func TestSourceStateRead(t *testing.T) {
 		},
 		{
 			name: "ignore_file",
-			root: map[string]interface{}{
-				"/home/user/.local/share/chezmoi": map[string]interface{}{
+			root: map[string]any{
+				"/home/user/.local/share/chezmoi": map[string]any{
 					".file": "# contents of .file\n",
 				},
 			},
@@ -1157,47 +1609,263 @@ func TestSourceStateRead(t *testing.T) {
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			chezmoitest.WithTestFS(t, tc.root, func(fs vfs.FS) {
-				system := NewRealSystem(fs)
+			chezmoitest.WithTestFS(t, tc.root, func(fileSystem vfs.FS) {
+				ctx := t.Context()
+				system := NewRealSystem(fileSystem)
 				s := NewSourceState(
-					WithDestDir("/home/user"),
-					WithSourceDir("/home/user/.local/share/chezmoi"),
+					WithBaseSystem(system),
+					WithDestDir(NewAbsPath("/home/user")),
+					WithSourceDir(NewAbsPath("/home/user/.local/share/chezmoi")),
 					WithSystem(system),
+					WithVersion(semver.Version{
+						Major: 1,
+						Minor: 2,
+						Patch: 3,
+					}),
 				)
-				err := s.Read()
+				err := s.Read(ctx, nil)
 				if tc.expectedError != "" {
 					assert.Error(t, err)
 					assert.Equal(t, tc.expectedError, err.Error())
 					return
 				}
-				require.NoError(t, err)
+				assert.NoError(t, err)
 				requireEvaluateAll(t, s, system)
-				tc.expectedSourceState.destDirAbsPath = "/home/user"
-				tc.expectedSourceState.sourceDirAbsPath = "/home/user/.local/share/chezmoi"
+				tc.expectedSourceState.destDirAbsPath = NewAbsPath("/home/user")
+				tc.expectedSourceState.sourceDirAbsPath = NewAbsPath(
+					"/home/user/.local/share/chezmoi",
+				)
 				requireEvaluateAll(t, tc.expectedSourceState, system)
-				s.system = nil
 				s.templateData = nil
-				assert.Equal(t, tc.expectedSourceState, s)
+				s.version = semver.Version{}
+				assert.Equal(t, tc.expectedSourceState, s, assert.Exclude[System]())
 			})
 		})
 	}
 }
 
+func TestSourceStateReadExternal(t *testing.T) {
+	httpServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, err := w.Write([]byte("data"))
+		assert.NoError(t, err)
+	}))
+	defer httpServer.Close()
+
+	for _, tc := range []struct {
+		name              string
+		root              any
+		expectedExternals map[RelPath][]*External
+	}{
+		{
+			name: "external_yaml",
+			root: map[string]any{
+				"/home/user/.local/share/chezmoi": map[string]any{
+					".chezmoiexternal.yaml": chezmoitest.JoinLines(
+						`file:`,
+						`    type: "file"`,
+						`    url: "`+httpServer.URL+`/file"`,
+					),
+				},
+			},
+			expectedExternals: map[RelPath][]*External{
+				NewRelPath("file"): {
+					{
+						Type:          ExternalTypeFile,
+						URL:           httpServer.URL + "/file",
+						sourceAbsPath: NewAbsPath("/home/user/.local/share/chezmoi/.chezmoiexternal.yaml"),
+					},
+				},
+			},
+		},
+		{
+			name: "external_toml",
+			root: map[string]any{
+				"/home/user/.local/share/chezmoi": map[string]any{
+					".chezmoiexternal.toml": chezmoitest.JoinLines(
+						`[file]`,
+						`    type = "file"`,
+						`    url = "`+httpServer.URL+`/file"`,
+					),
+				},
+			},
+			expectedExternals: map[RelPath][]*External{
+				NewRelPath("file"): {
+					{
+						Type:          ExternalTypeFile,
+						URL:           httpServer.URL + "/file",
+						sourceAbsPath: NewAbsPath("/home/user/.local/share/chezmoi/.chezmoiexternal.toml"),
+					},
+				},
+			},
+		},
+		{
+			name: "external_in_subdir",
+			root: map[string]any{
+				"/home/user/.local/share/chezmoi/dot_dir": map[string]any{
+					".chezmoiexternal.yaml": chezmoitest.JoinLines(
+						`file:`,
+						`    type: "file"`,
+						`    url: "`+httpServer.URL+`/file"`,
+					),
+				},
+			},
+			expectedExternals: map[RelPath][]*External{
+				NewRelPath(".dir/file"): {
+					{
+						Type:          ExternalTypeFile,
+						URL:           httpServer.URL + "/file",
+						sourceAbsPath: NewAbsPath("/home/user/.local/share/chezmoi/dot_dir/.chezmoiexternal.yaml"),
+					},
+				},
+			},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			chezmoitest.WithTestFS(t, tc.root, func(fileSystem vfs.FS) {
+				ctx := t.Context()
+				system := NewRealSystem(fileSystem)
+				s := NewSourceState(
+					WithBaseSystem(system),
+					WithCacheDir(NewAbsPath("/home/user/.cache/chezmoi")),
+					WithDestDir(NewAbsPath("/home/user")),
+					WithSourceDir(NewAbsPath("/home/user/.local/share/chezmoi")),
+					WithSystem(system),
+				)
+				assert.NoError(t, s.Read(ctx, nil))
+				assert.Equal(t, tc.expectedExternals, s.externals)
+			})
+		})
+	}
+}
+
+func TestSourceStateReadScriptsConcurrent(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		root any
+	}{
+		{
+			name: "with_ignore",
+			root: map[string]any{
+				"/home/user/.local/share/chezmoi": map[string]any{
+					".chezmoiignore": ".chezmoiscripts/linux/**\n",
+					".chezmoiscripts": map[string]any{
+						"linux":  manyScripts(1000),
+						"darwin": manyScripts(1000),
+					},
+				},
+			},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			chezmoitest.WithTestFS(t, tc.root, func(fileSystem vfs.FS) {
+				ctx := t.Context()
+				system := NewRealSystem(fileSystem)
+				s := NewSourceState(
+					WithBaseSystem(system),
+					WithCacheDir(NewAbsPath("/home/user/.cache/chezmoi")),
+					WithDestDir(NewAbsPath("/home/user")),
+					WithSourceDir(NewAbsPath("/home/user/.local/share/chezmoi")),
+					WithSystem(system),
+				)
+
+				assert.NoError(t, s.Read(ctx, nil))
+			})
+		})
+	}
+}
+
+func TestSourceStateReadExternalCache(t *testing.T) {
+	buffer := &bytes.Buffer{}
+	tarWriterSystem := NewTarWriterSystem(buffer, tar.Header{})
+	assert.NoError(t, tarWriterSystem.WriteFile(NewAbsPath("file"), []byte("# contents of file\n"), 0o666))
+	assert.NoError(t, tarWriterSystem.Close())
+	archiveData := buffer.Bytes()
+
+	httpRequests := 0
+	httpServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		httpRequests++
+		_, err := w.Write(archiveData)
+		assert.NoError(t, err)
+	}))
+	defer httpServer.Close()
+
+	now := time.Now()
+
+	chezmoitest.WithTestFS(t, map[string]any{
+		"/home/user/.local/share/chezmoi": map[string]any{
+			".chezmoiexternal.yaml": chezmoitest.JoinLines(
+				`.dir:`,
+				`    type: "archive"`,
+				`    url: "`+httpServer.URL+`/archive.tar"`,
+				`    refreshPeriod: "1m"`,
+			),
+		},
+	}, func(fileSystem vfs.FS) {
+		ctx := t.Context()
+		system := NewRealSystem(fileSystem)
+
+		readSourceState := func(refreshExternals RefreshExternals) {
+			s := NewSourceState(
+				WithBaseSystem(system),
+				WithCacheDir(NewAbsPath("/home/user/.cache/chezmoi")),
+				WithDestDir(NewAbsPath("/home/user")),
+				WithSourceDir(NewAbsPath("/home/user/.local/share/chezmoi")),
+				WithSystem(system),
+			)
+			assert.NoError(t, s.Read(ctx, &ReadOptions{
+				RefreshExternals: refreshExternals,
+				TimeNow: func() time.Time {
+					return now
+				},
+			}))
+			assert.Equal(t, map[RelPath][]*External{
+				NewRelPath(".dir"): {
+					{
+						Type:          ExternalTypeArchive,
+						URL:           httpServer.URL + "/archive.tar",
+						RefreshPeriod: Duration(1 * time.Minute),
+						sourceAbsPath: NewAbsPath("/home/user/.local/share/chezmoi/.chezmoiexternal.yaml"),
+					},
+				},
+			}, s.externals)
+		}
+
+		readSourceState(RefreshExternalsAuto)
+		assert.Equal(t, 1, httpRequests)
+
+		now = now.Add(10 * time.Second)
+		readSourceState(RefreshExternalsAuto)
+		assert.Equal(t, 1, httpRequests)
+
+		now = now.Add(1 * time.Minute)
+		readSourceState(RefreshExternalsAuto)
+		assert.Equal(t, 2, httpRequests)
+
+		now = now.Add(10 * time.Second)
+		readSourceState(RefreshExternalsAlways)
+		assert.Equal(t, 3, httpRequests)
+
+		now = now.Add(5 * time.Minute)
+		readSourceState(RefreshExternalsNever)
+		assert.Equal(t, 3, httpRequests)
+	})
+}
+
 func TestSourceStateTargetRelPaths(t *testing.T) {
 	for _, tc := range []struct {
 		name                   string
-		root                   interface{}
-		expectedTargetRelPaths RelPaths
+		root                   any
+		expectedTargetRelPaths []RelPath
 	}{
 		{
 			name:                   "empty",
 			root:                   nil,
-			expectedTargetRelPaths: RelPaths{},
+			expectedTargetRelPaths: []RelPath{},
 		},
 		{
 			name: "scripts",
-			root: map[string]interface{}{
-				"/home/user/.local/share/chezmoi": map[string]interface{}{
+			root: map[string]any{
+				"/home/user/.local/share/chezmoi": map[string]any{
 					"run_before_1before": "",
 					"run_before_2before": "",
 					"run_before_3before": "",
@@ -1209,73 +1877,449 @@ func TestSourceStateTargetRelPaths(t *testing.T) {
 					"run_after_3after":   "",
 				},
 			},
-			expectedTargetRelPaths: RelPaths{
-				"1before",
-				"2before",
-				"3before",
-				"1",
-				"2",
-				"3",
-				"1after",
-				"2after",
-				"3after",
+			expectedTargetRelPaths: []RelPath{
+				NewRelPath("1before"),
+				NewRelPath("2before"),
+				NewRelPath("3before"),
+				NewRelPath("1"),
+				NewRelPath("2"),
+				NewRelPath("3"),
+				NewRelPath("1after"),
+				NewRelPath("2after"),
+				NewRelPath("3after"),
 			},
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			chezmoitest.WithTestFS(t, tc.root, func(fs vfs.FS) {
+			chezmoitest.WithTestFS(t, tc.root, func(fileSystem vfs.FS) {
+				ctx := t.Context()
+				system := NewRealSystem(fileSystem)
 				s := NewSourceState(
-					WithSourceDir("/home/user/.local/share/chezmoi"),
-					WithSystem(NewRealSystem(fs)),
+					WithBaseSystem(system),
+					WithSourceDir(NewAbsPath("/home/user/.local/share/chezmoi")),
+					WithSystem(system),
 				)
-				require.NoError(t, s.Read())
+				assert.NoError(t, s.Read(ctx, nil))
 				assert.Equal(t, tc.expectedTargetRelPaths, s.TargetRelPaths())
 			})
 		})
 	}
 }
 
+func TestTemplateOptionsParseDirectives(t *testing.T) {
+	for _, tc := range []struct {
+		name            string
+		dataStr         string
+		expected        TemplateOptions
+		expectedErr     string
+		expectedDataStr string
+	}{
+		{
+			name: "empty",
+		},
+		{
+			name:    "unquoted",
+			dataStr: "chezmoi:template:left-delimiter=[[ right-delimiter=]]",
+			expected: TemplateOptions{
+				LeftDelimiter:  "[[",
+				RightDelimiter: "]]",
+			},
+		},
+		{
+			name:    "quoted",
+			dataStr: `chezmoi:template:left-delimiter="# {{" right-delimiter="}}"`,
+			expected: TemplateOptions{
+				LeftDelimiter:  "# {{",
+				RightDelimiter: "}}",
+			},
+		},
+		{
+			name:    "left_only",
+			dataStr: "chezmoi:template:left-delimiter=[[",
+			expected: TemplateOptions{
+				LeftDelimiter: "[[",
+			},
+		},
+		{
+			name:    "left_quoted_only",
+			dataStr: `chezmoi:template:left-delimiter="# [["`,
+			expected: TemplateOptions{
+				LeftDelimiter: "# [[",
+			},
+		},
+		{
+			name:    "right_quoted_only",
+			dataStr: `chezmoi:template:right-delimiter="]]"`,
+			expected: TemplateOptions{
+				RightDelimiter: "]]",
+			},
+		},
+		{
+			name:    "line_with_leading_data",
+			dataStr: "# chezmoi:template:left-delimiter=[[ right-delimiter=]]",
+			expected: TemplateOptions{
+				LeftDelimiter:  "[[",
+				RightDelimiter: "]]",
+			},
+		},
+		{
+			name: "line_before",
+			dataStr: chezmoitest.JoinLines(
+				"# before",
+				"# chezmoi:template:left-delimiter=[[ right-delimiter=]]",
+			),
+			expected: TemplateOptions{
+				LeftDelimiter:  "[[",
+				RightDelimiter: "]]",
+			},
+			expectedDataStr: chezmoitest.JoinLines(
+				"# before",
+			),
+		},
+		{
+			name: "line_after",
+			dataStr: chezmoitest.JoinLines(
+				"# chezmoi:template:left-delimiter=[[ right-delimiter=]]",
+				"# after",
+			),
+			expected: TemplateOptions{
+				LeftDelimiter:  "[[",
+				RightDelimiter: "]]",
+			},
+			expectedDataStr: chezmoitest.JoinLines(
+				"# after",
+			),
+		},
+		{
+			name: "line_before_and_after",
+			dataStr: chezmoitest.JoinLines(
+				"# before",
+				"# chezmoi:template:left-delimiter=[[ right-delimiter=]]",
+				"# after",
+			),
+			expected: TemplateOptions{
+				LeftDelimiter:  "[[",
+				RightDelimiter: "]]",
+			},
+			expectedDataStr: chezmoitest.JoinLines(
+				"# before",
+				"# after",
+			),
+		},
+		{
+			name: "multiple_lines",
+			dataStr: chezmoitest.JoinLines(
+				"# before",
+				"# chezmoi:template:left-delimiter=<<",
+				"# during",
+				"# chezmoi:template:left-delimiter=[[",
+				"# chezmoi:template:right-delimiter=]]",
+				"# after",
+			),
+			expected: TemplateOptions{
+				LeftDelimiter:  "[[",
+				RightDelimiter: "]]",
+			},
+			expectedDataStr: chezmoitest.JoinLines(
+				"# before",
+				"# during",
+				"# after",
+			),
+		},
+		{
+			name: "duplicate_directives",
+			dataStr: chezmoitest.JoinLines(
+				"# chezmoi:template:left-delimiter=<<",
+				"# chezmoi:template:left-delimiter=[[",
+			),
+			expected: TemplateOptions{
+				LeftDelimiter: "[[",
+			},
+		},
+		{
+			name:    "missing_key",
+			dataStr: "chezmoi:template:missing-key=zero",
+			expected: TemplateOptions{
+				Options: []string{"missingkey=zero"},
+			},
+		},
+		{
+			name:    "line_ending_crlf",
+			dataStr: "chezmoi:template:line-ending=crlf",
+			expected: TemplateOptions{
+				LineEnding: "\r\n",
+			},
+		},
+		{
+			name:    "line_endings_crlf",
+			dataStr: "chezmoi:template:line-endings=crlf",
+			expected: TemplateOptions{
+				LineEnding: "\r\n",
+			},
+		},
+		{
+			name:    "line_ending_quoted",
+			dataStr: `chezmoi:template:line-ending="\n"`,
+			expected: TemplateOptions{
+				LineEnding: "\n",
+			},
+		},
+		{
+			name:    "line_endings_quoted",
+			dataStr: `chezmoi:template:line-endings="\n"`,
+			expected: TemplateOptions{
+				LineEnding: "\n",
+			},
+		},
+		{
+			name:    "format_indent_string",
+			dataStr: `chezmoi:template:format-indent="\t"`,
+			expected: TemplateOptions{
+				FormatIndent: "\t",
+			},
+		},
+		{
+			name:    "format_indent_width_number",
+			dataStr: `chezmoi:template:format-indent-width=2`,
+			expected: TemplateOptions{
+				FormatIndent: "  ",
+			},
+		},
+		{
+			name:        "format_indent_width_number_error",
+			dataStr:     `chezmoi:template:format-indent-width=x`,
+			expectedErr: `strconv.Atoi: parsing "x": invalid syntax`,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var actual TemplateOptions
+			actualData, err := actual.parseAndRemoveDirectives([]byte(tc.dataStr))
+			if tc.expectedErr != "" {
+				assert.EqualError(t, err, tc.expectedErr)
+			} else {
+				assert.NoError(t, err)
+				assert.Equal(t, tc.expected, actual)
+				assert.Equal(t, tc.expectedDataStr, string(actualData))
+			}
+		})
+	}
+}
+
+func TestSourceStateExternalErrors(t *testing.T) {
+	for _, tc := range []struct {
+		name        string
+		shareDir    map[string]any
+		expectedErr string
+	}{
+		{
+			name: "missing_type",
+			shareDir: map[string]any{
+				".chezmoiexternal.toml": chezmoitest.JoinLines(
+					`["dir"]`,
+					`    url = "http://example.com/"`,
+				),
+			},
+			expectedErr: "dir: missing external type",
+		},
+		{
+			name: "empty_rel_path",
+			shareDir: map[string]any{
+				".chezmoiexternal.toml": chezmoitest.JoinLines(
+					`[""]`,
+					`    type = "file"`,
+					`    url = "http://example.com/"`,
+				),
+			},
+			expectedErr: "/home/user/.local/share/chezmoi/.chezmoiexternal.toml: empty path",
+		},
+		{
+			name: "relative_empty_rel_path",
+			shareDir: map[string]any{
+				".chezmoiexternal.toml": chezmoitest.JoinLines(
+					`["."]`,
+					`    type = "file"`,
+					`    url = "http://example.com/"`,
+				),
+			},
+			expectedErr: "/home/user/.local/share/chezmoi/.chezmoiexternal.toml: .: empty relative path",
+		},
+		{
+			name: "parent_root_rel_path",
+			shareDir: map[string]any{
+				".chezmoiexternal.toml": chezmoitest.JoinLines(
+					`[".."]`,
+					`    type = "file"`,
+					`    url = "http://example.com/"`,
+				),
+			},
+			expectedErr: "/home/user/.local/share/chezmoi/.chezmoiexternal.toml: ..: relative path outside target directory",
+		},
+		{
+			name: "relative_parent_root_rel_path",
+			shareDir: map[string]any{
+				".chezmoiexternal.toml": chezmoitest.JoinLines(
+					`["./.."]`,
+					`    type = "file"`,
+					`    url = "http://example.com/"`,
+				),
+			},
+			expectedErr: "/home/user/.local/share/chezmoi/.chezmoiexternal.toml: ./..: relative path outside target directory",
+		},
+		{
+			name: "relative_empty",
+			shareDir: map[string]any{
+				".chezmoiexternal.toml": chezmoitest.JoinLines(
+					`["a/../b/.."]`,
+					`    type = "file"`,
+					`    url = "http://example.com/"`,
+				),
+			},
+			expectedErr: "/home/user/.local/share/chezmoi/.chezmoiexternal.toml: a/../b/..: empty relative path",
+		},
+		{
+			name: "relative_parent",
+			shareDir: map[string]any{
+				".chezmoiexternal.toml": chezmoitest.JoinLines(
+					`["a/../b/../.."]`,
+					`    type = "file"`,
+					`    url = "http://example.com/"`,
+				),
+			},
+			expectedErr: "/home/user/.local/share/chezmoi/.chezmoiexternal.toml: a/../b/../..: relative path outside target directory",
+		},
+		{
+			name: "relative_outside_parent",
+			shareDir: map[string]any{
+				".chezmoiexternal.toml": chezmoitest.JoinLines(
+					`["../bin"]`,
+					`    type = "file"`,
+					`    url = "http://example.com/"`,
+				),
+			},
+			expectedErr: "/home/user/.local/share/chezmoi/.chezmoiexternal.toml: ../bin: relative path outside target directory",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			chezmoitest.WithTestFS(t, map[string]any{
+				"/home/user/.local/share/chezmoi": tc.shareDir,
+			}, func(fileSystem vfs.FS) {
+				ctx := t.Context()
+				system := NewRealSystem(fileSystem)
+				s := NewSourceState(
+					WithBaseSystem(system),
+					WithCacheDir(NewAbsPath("/home/user/.cache/chezmoi")),
+					WithDestDir(NewAbsPath("/home/user")),
+					WithSourceDir(NewAbsPath("/home/user/.local/share/chezmoi")),
+					WithSystem(system),
+				)
+				err := s.Read(ctx, nil)
+				assert.Error(t, err)
+				assert.Equal(t, err.Error(), tc.expectedErr)
+			})
+		})
+	}
+}
+
+// applyAll updates targetDirAbsPath in targetSystem to match s.
+func (s *SourceState) applyAll(
+	targetSystem, destSystem System,
+	persistentState PersistentState,
+	targetDirAbsPath AbsPath,
+	options ApplyOptions,
+) error {
+	for _, targetRelPath := range s.TargetRelPaths() {
+		switch err := s.Apply(targetSystem, destSystem, persistentState, targetDirAbsPath, targetRelPath, options); {
+		case errors.Is(err, fs.SkipDir):
+			continue
+		case err != nil:
+			return err
+		}
+	}
+	return nil
+}
+
 // requireEvaluateAll requires that every target state entry in s evaluates
 // without error.
 func requireEvaluateAll(t *testing.T, s *SourceState, destSystem System) {
 	t.Helper()
-	for _, targetRelPath := range s.TargetRelPaths() {
-		sourceStateEntry := s.entries[targetRelPath]
-		require.NoError(t, sourceStateEntry.Evaluate())
+	err := s.root.ForEach(EmptyRelPath, func(targetRelPath RelPath, sourceStateEntry SourceStateEntry) error {
+		assert.NoError(t, sourceStateEntry.Evaluate())
+		if sourceStateFile, ok := sourceStateEntry.(*SourceStateFile); ok {
+			contents, err := sourceStateFile.Contents()
+			assert.NoError(t, err)
+			contentsSHA256, err := sourceStateFile.ContentsSHA256()
+			assert.NoError(t, err)
+			assert.Equal(t, sha256.Sum256(contents), contentsSHA256)
+		}
 		destAbsPath := s.destDirAbsPath.Join(targetRelPath)
 		targetStateEntry, err := sourceStateEntry.TargetStateEntry(destSystem, destAbsPath)
-		require.NoError(t, err)
-		require.NoError(t, targetStateEntry.Evaluate())
-	}
+		assert.NoError(t, err)
+		assert.NoError(t, targetStateEntry.Evaluate())
+		switch targetStateEntry := targetStateEntry.(type) {
+		case *TargetStateFile:
+			contents, err := targetStateEntry.Contents()
+			assert.NoError(t, err)
+			contentsSHA256, err := targetStateEntry.ContentsSHA256()
+			assert.NoError(t, err)
+			assert.Equal(t, sha256.Sum256(contents), contentsSHA256)
+		case *TargetStateScript:
+			contents, err := targetStateEntry.Contents()
+			assert.NoError(t, err)
+			contentsSHA256, err := targetStateEntry.ContentsSHA256()
+			assert.NoError(t, err)
+			assert.Equal(t, sha256.Sum256(contents), contentsSHA256)
+		}
+		return nil
+	})
+	assert.NoError(t, err)
 }
 
 func withEntries(sourceEntries map[RelPath]SourceStateEntry) SourceStateOption {
 	return func(s *SourceState) {
-		s.entries = sourceEntries
+		s.root = SourceStateEntryTreeNode{}
+		for targetRelPath, sourceStateEntry := range sourceEntries {
+			s.root.Set(targetRelPath, sourceStateEntry)
+		}
 	}
 }
 
-func withIgnore(ignore *patternSet) SourceStateOption {
+func withIgnore(ignore *PatternSet) SourceStateOption {
 	return func(s *SourceState) {
 		s.ignore = ignore
 	}
 }
 
-func withMinVersion(minVersion semver.Version) SourceStateOption {
+func withIgnoredRelPathStrs(relPathStrs ...string) SourceStateOption {
 	return func(s *SourceState) {
-		s.minVersion = minVersion
+		for _, relPathStr := range relPathStrs {
+			s.ignoredRelPaths.Add(NewRelPath(relPathStr))
+		}
+	}
+}
+
+func withRemove(remove *PatternSet) SourceStateOption {
+	return func(s *SourceState) {
+		s.remove = remove
 	}
 }
 
 // withUserTemplateData adds template data.
-func withUserTemplateData(templateData map[string]interface{}) SourceStateOption {
+func withUserTemplateData(templateData map[string]any) SourceStateOption {
 	return func(s *SourceState) {
 		RecursiveMerge(s.userTemplateData, templateData)
 	}
 }
 
-func withTemplates(templates map[string]*template.Template) SourceStateOption {
+func withTemplates(templates map[string]*Template) SourceStateOption {
 	return func(s *SourceState) {
 		s.templates = templates
 	}
+}
+
+func manyScripts(amount int) map[string]any {
+	scripts := map[string]any{}
+	for i := range amount {
+		scripts[fmt.Sprintf("run_onchange_before_%d.sh", i)] = ""
+	}
+	return scripts
 }
